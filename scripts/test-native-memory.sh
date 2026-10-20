@@ -1,0 +1,17 @@
+#!/bin/sh
+# Short, sequential, opt-in memory baseline. No downloads or system changes.
+set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then
+    echo "Usage: sh scripts/test-native-memory.sh EXISTING_LOCAL_GGUF" >&2
+    exit 2
+fi
+model_dir=$(CDPATH= cd -- "$(dirname -- "$1")" && pwd)
+stamp=$(date -u +%Y%m%dT%H%M%S)
+output_dir="$root/benchmarks/results/memory-$stamp"
+mkdir -m 700 "$output_dir"
+export INFERNO_NATIVE_RPC_MODEL="$model_dir/$(basename -- "$1")"
+export INFERNO_NATIVE_RPC_SERVER="$root/build/grpc/inferno_rpc_server"
+export INFERNO_NATIVE_MEMORY_OUTPUT="$output_dir/results.json"
+sh "$root/scripts/go-local.sh" test -race -count=1 -timeout=45s ./internal/rpcbackend -run '^TestNativeMemoryBaseline$' -v
+echo "Memory baseline: $INFERNO_NATIVE_MEMORY_OUTPUT"

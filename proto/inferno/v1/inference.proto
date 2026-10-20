@@ -1,0 +1,185 @@
+syntax = "proto3";
+
+package inferno.v1;
+
+option go_package = "inferno.local/controlplane/gen/inferno/v1;infernopb";
+
+// Shared Go/C++ contract. Bindings are generated from this file, never handwritten.
+service InferenceService {
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+  // Deadlines/cancellation use the gRPC call context, not payload timestamps.
+  rpc Generate(GenerateRequest) returns (stream GenerateEvent);
+  rpc Cancel(CancelRequest) returns (CancelResponse);
+}
+
+message GetStatusRequest {}
+
+message GetStatusResponse {
+  // A responding service is live. Only READY means model/runtime readiness.
+  BackendState state = 1;
+  optional string model_id = 2;
+  // Point-in-time C++ runtime occupancy; request counts, not payload bytes.
+  SchedulerSnapshot scheduler = 3;
+  // Bounded process snapshots plus llama.cpp allocation accounting.
+  optional MemorySnapshot memory = 4;
+}
+
+message SchedulerSnapshot {
+  // Accepted requests not yet published as executing by the single worker.
+  uint32 waiting_requests = 1;
+  // Current implementation is single-worker: always zero or one.
+  uint32 executing_requests = 2;
+  // Maximum waiting request items; excludes the executing request.
+  uint32 queue_capacity = 3;
+}
+
+message MemorySnapshot {
+  // At most one latest sample for each lifecycle point.
+  repeated ProcessMemorySample process_samples = 1;
+  optional uint64 model_tensor_bytes = 2;
+  // Bounded upstream buffer-type rows. Allocation data overlaps process memory.
+  repeated LlamaBufferAllocation llama_buffers = 3;
+  optional uint64 llama_model_allocated_bytes = 4;
+  optional uint64 llama_context_allocated_bytes = 5;
+  optional uint64 llama_compute_allocated_bytes = 6;
+  uint32 configured_context_tokens = 7;
+  uint32 configured_batch_tokens = 8;
+  uint32 configured_sequences = 9;
+  int32 configured_gpu_layers = 10;
+}
+
+message ProcessMemorySample {
+  MemorySamplePoint point = 1;
+  MeasurementStatus status = 2;
+  // std::chrono::steady_clock; comparable only inside this backend process.
+  uint64 monotonic_ns = 3;
+  optional uint64 resident_bytes = 4;
+  optional uint64 peak_resident_bytes = 5;
+  optional uint64 physical_footprint_bytes = 6;
+  optional uint64 peak_physical_footprint_bytes = 7;
+}
+
+message LlamaBufferAllocation {
+  string name = 1;
+  uint64 model_bytes = 2;
+  uint64 context_bytes = 3;
+  uint64 compute_bytes = 4;
+}
+
+enum MemorySamplePoint {
+  MEMORY_SAMPLE_POINT_UNSPECIFIED = 0;
+  MEMORY_SAMPLE_POINT_BACKEND_READY = 1;
+  MEMORY_SAMPLE_POINT_REQUEST_START = 2;
+  MEMORY_SAMPLE_POINT_PREFILL_COMPLETE = 3;
+  MEMORY_SAMPLE_POINT_REQUEST_COMPLETE_BEFORE_CLEANUP = 4;
+  MEMORY_SAMPLE_POINT_REQUEST_COMPLETE_AFTER_CLEANUP = 5;
+}
+
+enum MeasurementStatus {
+  MEASUREMENT_STATUS_UNSPECIFIED = 0;
+  MEASUREMENT_STATUS_MEASURED = 1;
+  MEASUREMENT_STATUS_UNAVAILABLE = 2;
+}
+
+enum BackendState {
+  BACKEND_STATE_UNSPECIFIED = 0;
+  BACKEND_STATE_READY = 1;
+  BACKEND_STATE_NO_MODEL = 2;
+  BACKEND_STATE_LOADING = 3;
+  BACKEND_STATE_DRAINING = 4;
+  BACKEND_STATE_FAILED = 5;
+}
+
+message GenerateRequest {
+  // Nonzero and unique among active requests; public JSON renders it as a string.
+  uint64 request_id = 1;
+  string prompt = 2;
+  // Explicit 1..512 for the current native adapter; zero is invalid.
+  uint32 max_output_tokens = 3;
+}
+
+message GenerateEvent {
+  uint64 request_id = 1;
+  // Exactly: accepted, zero or more tokens, finished; then OK trailers.
+  // A transport interruption may prevent finished delivery. See docs/grpc-contract.md.
+  oneof payload {
+    Accepted accepted = 2;
+    Token token = 3;
+    Finished finished = 4;
+  }
+}
+
+message Accepted {}
+
+message Token {
+  // One raw native non-EOG piece. May be empty or split a UTF-8 code point.
+  bytes piece = 1;
+  // Starts at 1, increases by exactly 1 per native token event, including empties.
+  uint32 output_tokens = 2;
+}
+
+message Finished {
+  TerminalState state = 1;
+  // Present on every finished event; optional fields preserve unavailable values.
+  RequestMetrics metrics = 2;
+  // Absent for COMPLETED; required for other terminal states.
+  InferenceError error = 3;
+}
+
+enum TerminalState {
+  TERMINAL_STATE_UNSPECIFIED = 0;
+  TERMINAL_STATE_COMPLETED = 1;
+  TERMINAL_STATE_CANCELLED = 2;
+  TERMINAL_STATE_TIMED_OUT = 3;
+  TERMINAL_STATE_FAILED = 4;
+}
+
+message RequestMetrics {
+  uint32 output_tokens = 1;
+  // All durations are milliseconds, measured in the C++ runtime.
+  optional double runtime_latency_ms = 2;
+  optional double queue_wait_ms = 3;
+  optional double backend_execution_ms = 4;
+  optional double prefill_phase_ms = 5;
+  optional double decode_phase_ms = 6;
+  optional double ttft_ms = 7;
+  optional double mean_inter_token_ms = 8;
+  optional double decode_tokens_per_second = 9;
+}
+
+// Used in Finished and in the inferno-error-bin trailer for RPC-level failures.
+// gRPC status remains authoritative for transport/RPC failure.
+message InferenceError {
+  // Zero only when no valid ID could be extracted; never used to submit work.
+  uint64 request_id = 1;
+  ErrorCode code = 2;
+  string message = 3;
+}
+
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_INVALID_REQUEST = 1;
+  ERROR_CODE_QUEUE_FULL = 2;
+  ERROR_CODE_BACKEND_UNAVAILABLE = 3;
+  ERROR_CODE_DUPLICATE_REQUEST_ID = 4;
+  ERROR_CODE_CANCELLED = 5;
+  ERROR_CODE_DEADLINE_EXCEEDED = 6;
+  ERROR_CODE_BACKEND_FAILURE = 7;
+  ERROR_CODE_UNKNOWN_REQUEST_ID = 8;
+}
+
+message CancelRequest {
+  uint64 request_id = 1;
+}
+
+message CancelResponse {
+  uint64 request_id = 1;
+  CancelDisposition disposition = 2;
+}
+
+enum CancelDisposition {
+  CANCEL_DISPOSITION_UNSPECIFIED = 0;
+  CANCEL_DISPOSITION_REQUESTED = 1;
+  CANCEL_DISPOSITION_ALREADY_REQUESTED = 2;
+  CANCEL_DISPOSITION_FINISHED = 3;
+}

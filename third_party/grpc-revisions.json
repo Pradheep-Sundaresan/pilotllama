@@ -1,0 +1,17 @@
+{
+  "release": "v1.76.0",
+  "sources": [
+    {"path": "third_party/grpc", "revision": "f5ffb68d8a2fd603dff16287e90a4ac571e1fec6", "url": "https://github.com/grpc/grpc.git"},
+    {"path": "third_party/grpc/third_party/abseil-cpp", "revision": "76bb24329e8bf5f39704eb10d21b9a80befa7c81", "url": "https://github.com/abseil/abseil-cpp.git"},
+    {"path": "third_party/grpc/third_party/boringssl-with-bazel", "revision": "c63fadbde60a2224c22189d14c4001bbd2a3a629", "url": "https://github.com/google/boringssl.git"},
+    {"path": "third_party/grpc/third_party/cares/cares", "revision": "d3a507e920e7af18a5efb7f9f1d8044ed4750013", "url": "https://github.com/c-ares/c-ares.git"},
+    {"path": "third_party/grpc/third_party/protobuf", "revision": "74211c0dfc2777318ab53c2cd2c317a2ef9012de", "url": "https://github.com/protocolbuffers/protobuf.git"},
+    {"path": "third_party/grpc/third_party/re2", "revision": "0c5616df9c0aaa44c9440d87422012423d91c7d1", "url": "https://github.com/google/re2.git"},
+    {"path": "third_party/grpc/third_party/zlib", "revision": "f1f503da85d52e56aae11557b4d79a42bcaa2b86", "url": "https://github.com/madler/zlib.git"}
+  ],
+  "go": {
+    "google.golang.org/grpc": "v1.75.1",
+    "google.golang.org/protobuf": "v1.36.9",
+    "google.golang.org/grpc/cmd/protoc-gen-go-grpc": "v1.5.1"
+  }
+}

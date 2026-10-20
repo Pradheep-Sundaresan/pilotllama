@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">PilotLlama request lifecycle</title>
+  <desc id="desc">Request states from HTTP arrival through Go policy, gRPC, native scheduling, llama.cpp generation, streaming completion, cancellation, and structured rejection paths.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#070b12"/><stop offset="1" stop-color="#0e1726"/></linearGradient>
+    <linearGradient id="active" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0ea5e9"/><stop offset="1" stop-color="#2563eb"/></linearGradient>
+    <filter id="shadow" x="-20%" y="-30%" width="140%" height="170%"><feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#6d3928" flood-opacity=".1"/></filter>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#38bdf8"/></marker>
+    <style>text{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;fill:#d9e6f2}.title{font-size:36px;font-weight:760}.label{font-size:12px;font-weight:700;letter-spacing:1.2px}.head{font-size:16px;font-weight:700}.small{font-size:12px}.tiny{font-size:11px}.muted{fill:#8ca0b3}.node{fill:#101826;stroke:#25364a;stroke-width:1.5}.warm{fill:#111c2b;stroke:#37506a;stroke-width:1.5}.ok{fill:#10241a;stroke:#2f6b47;stroke-width:1.5}.error{fill:#25151a;stroke:#7f3d45;stroke-width:1.5}.flow{fill:none;stroke:#38bdf8;stroke-width:2;marker-end:url(#arrow)}.branch{fill:none;stroke:#647f93;stroke-width:1.5;stroke-dasharray:5 5;marker-end:url(#arrow)}</style>
+  </defs>
+  <rect width="1600" height="900" rx="26" fill="url(#bg)"/><circle cx="1490" cy="65" r="180" fill="#164e63" opacity=".2"/>
+  <text x="64" y="61" class="title">One request, end to end</text><text x="64" y="89" font-size="17" class="muted">Exact ownership boundaries, bounded waiting, cooperative cancellation, and honest terminal states</text>
+  <g transform="translate(64 118)"><rect width="180" height="32" rx="5" fill="#111827" stroke="#25364a"/><text x="90" y="21" text-anchor="middle" font-size="13" fill="#d9e6f2">CLIENT / STUDIO</text><rect x="196" width="410" height="32" rx="5" fill="#2563eb"/><text x="401" y="21" text-anchor="middle" font-size="13" fill="#fff">GO CONTROL PLANE</text><rect x="622" width="394" height="32" rx="5" fill="#1d4ed8"/><text x="819" y="21" text-anchor="middle" font-size="13" fill="#fff">C++20 DATA PLANE</text><rect x="1032" width="440" height="32" rx="5" fill="#172554"/><text x="1252" y="21" text-anchor="middle" font-size="13" fill="#fff">LLAMA.CPP / METAL</text></g>
+
+  <!-- main flow row 1 -->
+  <g filter="url(#shadow)"><rect x="64" y="178" width="180" height="96" rx="5" class="node"/><rect x="282" y="178" width="190" height="96" rx="5" class="node"/><rect x="510" y="178" width="190" height="96" rx="5" class="node"/><rect x="738" y="178" width="190" height="96" rx="5" class="node"/><rect x="966" y="178" width="190" height="96" rx="5" class="node"/><rect x="1194" y="178" width="342" height="96" rx="5" class="node"/></g>
+  <text x="88" y="207" class="label" fill="#67e8f9">ARRIVE</text><text x="88" y="234" class="head">POST /chat</text><text x="88" y="257" class="small muted">JSON or SSE</text>
+  <text x="306" y="207" class="label" fill="#67e8f9">1 · AUTH</text><text x="306" y="234" class="head">Bearer check</text><text x="306" y="257" class="small muted">Before body parsing</text>
+  <text x="534" y="207" class="label" fill="#67e8f9">2 · GATE</text><text x="534" y="234" class="head">Admission open?</text><text x="534" y="257" class="small muted">Drain / resume</text>
+  <text x="762" y="207" class="label" fill="#67e8f9">3 · RATE</text><text x="762" y="234" class="head">Token bucket</text><text x="762" y="257" class="small muted">Shared, bounded policy</text>
+  <text x="990" y="207" class="label" fill="#67e8f9">4 · VALIDATE</text><text x="990" y="234" class="head">API + capacity</text><text x="990" y="257" class="small muted">4 public operation slots</text>
+  <text x="1218" y="207" class="label" fill="#67e8f9">5 · OPEN INTERNAL STREAM</text><text x="1218" y="234" class="head">Generate(request ID, deadline)</text><text x="1218" y="257" class="small muted">localhost gRPC · raw bytes + structured events</text>
+  <path d="M244 226H277" class="flow"/><path d="M472 226H505" class="flow"/><path d="M700 226H733" class="flow"/><path d="M928 226H961" class="flow"/><path d="M1156 226H1189" class="flow"/>
+
+  <!-- reject branches -->
+  <path d="M377 274V317" class="branch"/><path d="M605 274V317" class="branch"/><path d="M833 274V317" class="branch"/><path d="M1061 274V317" class="branch"/>
+  <rect x="294" y="324" width="166" height="61" rx="4" class="error"/><text x="377" y="349" text-anchor="middle" class="head">401</text><text x="377" y="370" text-anchor="middle" class="tiny">invalid_api_key</text>
+  <rect x="522" y="324" width="166" height="61" rx="4" class="error"/><text x="605" y="349" text-anchor="middle" class="head">503</text><text x="605" y="370" text-anchor="middle" class="tiny">admission_draining</text>
+  <rect x="750" y="324" width="166" height="61" rx="4" class="error"/><text x="833" y="349" text-anchor="middle" class="head">429 + Retry-After</text><text x="833" y="370" text-anchor="middle" class="tiny">rate_limit_exceeded</text>
+  <rect x="978" y="324" width="166" height="61" rx="4" class="error"/><text x="1061" y="349" text-anchor="middle" class="head">400 / 404 / 429</text><text x="1061" y="370" text-anchor="middle" class="tiny">input, model, or public capacity</text>
+  <text x="1200" y="351" class="small muted">These pre-gRPC outcomes do not enter the 128-record Generate history.</text>
+
+  <!-- native state machine -->
+  <rect x="64" y="425" width="1472" height="253" rx="6" fill="#0b1320" stroke="#2a4056" stroke-width="1.5"/>
+  <text x="88" y="457" class="label" fill="#67e8f9">NATIVE REQUEST STATE MACHINE · C++ OWNS CAPACITY, SCHEDULING AND CLEANUP</text>
+  <g filter="url(#shadow)"><rect x="92" y="486" width="190" height="112" rx="5" class="node"/><rect x="342" y="486" width="215" height="112" rx="5" class="warm"/><rect x="617" y="486" width="265" height="112" rx="5" fill="url(#active)"/><rect x="942" y="486" width="260" height="112" rx="5" class="warm"/><rect x="1262" y="486" width="242" height="112" rx="5" class="ok"/></g>
+  <text x="116" y="515" class="label" fill="#67e8f9">ADMISSION</text><text x="116" y="544" class="head">Capacity check</text><text x="116" y="569" class="small muted">Bounded items</text><text x="116" y="588" class="tiny muted">No Go inference queue</text>
+  <text x="366" y="515" class="label" fill="#67e8f9">WAITING</text><text x="366" y="544" class="head">Native queue</text><text x="366" y="569" class="small muted">Queue wait measured</text><text x="366" y="588" class="tiny muted">Cancel/expiry retains slot until dequeue</text>
+  <text x="641" y="515" class="label" fill="#fff">ACTIVE</text><text x="641" y="544" class="head" fill="#fff">Prefill → decode turns</text><text x="641" y="569" class="small" fill="#fff">Queue: 1 sequence · Continuous: 2</text><text x="641" y="588" class="tiny" fill="#fff">TTFT · tokens · per-sequence cleanup</text>
+  <text x="966" y="515" class="label" fill="#67e8f9">DELIVERY</text><text x="966" y="544" class="head">gRPC → HTTP/SSE</text><text x="966" y="569" class="small muted">UTF-8 pieces coalesced</text><text x="966" y="588" class="tiny muted">Each network write has a 5s budget</text>
+  <text x="1286" y="515" class="label" fill="#4ade80">SUCCESS</text><text x="1286" y="544" class="head">Finish + cleanup</text><text x="1286" y="569" class="small muted">JSON or SSE [DONE]</text><text x="1286" y="588" class="tiny muted">Completion record + aggregates</text>
+  <path d="M282 542H337" class="flow"/><path d="M557 542H612" class="flow"/><path d="M882 542H937" class="flow"/><path d="M1202 542H1257" class="flow"/>
+  <path d="M187 598V638H90" class="branch"/><rect x="90" y="620" width="208" height="36" rx="4" class="error"/><text x="194" y="643" text-anchor="middle" class="small">429 server_busy</text>
+
+  <!-- cancellation rail -->
+  <rect x="64" y="713" width="1020" height="126" rx="20" class="node" filter="url(#shadow)"/>
+  <text x="88" y="744" class="label" fill="#67e8f9">COOPERATIVE TERMINATION RAIL</text>
+  <circle cx="113" cy="783" r="10" fill="#38bdf8"/><text x="136" y="789" class="small">client disconnect</text><circle cx="310" cy="783" r="10" fill="#38bdf8"/><text x="333" y="789" class="small">request deadline</text><circle cx="500" cy="783" r="10" fill="#38bdf8"/><text x="523" y="789" class="small">HTTP shutdown</text><circle cx="680" cy="783" r="10" fill="#38bdf8"/><text x="703" y="789" class="small">explicit Cancel</text>
+  <path d="M119 805H942" class="flow"/><text x="515" y="828" text-anchor="middle" class="tiny muted">Go context → gRPC cancellation → native control handle → sequence cleanup</text>
+  <rect x="870" y="763" width="188" height="48" rx="14" class="error"/><text x="964" y="784" text-anchor="middle" class="head">Cancelled / 504</text><text x="964" y="802" text-anchor="middle" class="tiny">not a successful completion</text>
+
+  <rect x="1120" y="713" width="416" height="126" rx="20" class="node" filter="url(#shadow)"/>
+  <text x="1144" y="744" class="label" fill="#67e8f9">DELIVERY FAILURE</text><text x="1144" y="774" class="head">Partial stream is never success</text><text x="1144" y="799" class="small muted">Late SSE error has no finish / [DONE].</text><text x="1144" y="821" class="tiny muted">Metal work is not preempted; cleanup may outlast HTTP.</text>
+  <text x="64" y="875" class="tiny muted">Every boundary is bounded. Metrics preserve their measurement source; unavailable values remain unavailable.</text><text x="1536" y="875" text-anchor="end" class="tiny muted">PilotLlama · verified local architecture</text>
+</svg>

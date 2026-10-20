@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">PilotLlama architecture</title>
+  <desc id="desc">A layered architecture showing local clients, the React Studio, Go control plane, localhost gRPC boundary, C++ runtime, llama.cpp, Metal, and a user-supplied GGUF model.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#070b12"/><stop offset=".52" stop-color="#0a111d"/><stop offset="1" stop-color="#0e1726"/></linearGradient>
+    <linearGradient id="hero" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#0ea5e9"/><stop offset="1" stop-color="#2563eb"/></linearGradient>
+    <filter id="shadow" x="-20%" y="-30%" width="140%" height="170%"><feDropShadow dx="0" dy="7" stdDeviation="9" flood-color="#6d3928" flood-opacity=".11"/></filter>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#38bdf8"/></marker>
+    <style>
+      text{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;fill:#d9e6f2} .muted{fill:#8ca0b3}.tiny{font-size:11px}.small{font-size:13px}.body{font-size:15px}.label{font-size:12px;font-weight:600;letter-spacing:1.3px}.heading{font-size:19px;font-weight:700}.title{font-size:36px;font-weight:760}.card{fill:#101826;stroke:#25364a;stroke-width:1.5}.warm{fill:#111c2b;stroke:#37506a;stroke-width:1.5}.lane{fill:none;stroke:#38bdf8;stroke-width:2;marker-end:url(#arrow)}.dash{fill:none;stroke:#4b6b82;stroke-width:1.6;stroke-dasharray:6 6;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="1600" height="900" rx="26" fill="url(#bg)"/>
+  <circle cx="1460" cy="70" r="190" fill="#164e63" opacity=".22"/><circle cx="85" cy="820" r="190" fill="#1d4ed8" opacity=".11"/>
+  <text x="72" y="64" class="title">PilotLlama</text><text x="72" y="91" class="body muted">Local AI inference on Apple Silicon · one model · one managed service · every layer observable</text>
+  <rect x="1283" y="42" width="245" height="44" rx="6" fill="#111827" stroke="#25364a"/><text x="1405" y="70" text-anchor="middle" font-size="13" fill="#d9e6f2">LOOPBACK ONLY · USER SPACE</text>
+
+  <!-- clients -->
+  <text x="72" y="137" class="label" fill="#67e8f9">01 · LOCAL EXPERIENCE &amp; CLIENTS</text>
+  <g filter="url(#shadow)"><rect x="72" y="154" width="430" height="126" rx="6" class="card"/><rect x="521" y="154" width="430" height="126" rx="6" class="card"/><rect x="970" y="154" width="558" height="126" rx="6" class="card"/></g>
+  <circle cx="112" cy="194" r="20" fill="#102b3d"/><text x="112" y="200" text-anchor="middle" font-size="18">◉</text><text x="145" y="191" class="heading">PilotLlama Studio</text><text x="145" y="218" class="small muted">React · TypeScript · production bundle</text><text x="94" y="252" class="tiny">Playground · requests · scheduler · memory · benchmarks · health</text>
+  <circle cx="561" cy="194" r="20" fill="#102b3d"/><text x="561" y="200" text-anchor="middle" font-size="18">{ }</text><text x="594" y="191" class="heading">Apps &amp; SDK clients</text><text x="594" y="218" class="small muted">OpenAI-style HTTP/JSON + SSE</text><text x="543" y="252" class="tiny">Single user turn · greedy · n=1 · 1–512 output tokens</text>
+  <circle cx="1010" cy="194" r="20" fill="#102b3d"/><text x="1010" y="201" text-anchor="middle" font-size="19">↗</text><text x="1043" y="191" class="heading">Python experiment harness</text><text x="1043" y="218" class="small muted">Reproducible workloads · JSON/CSV evidence</text><text x="992" y="252" class="tiny">Client TTFT · latency · throughput · scheduler samples · memory</text>
+
+  <path d="M287 280V310" class="lane"/><path d="M736 280V310" class="lane"/><path d="M1249 280V310" class="dash"/>
+  <rect x="535" y="292" width="530" height="35" rx="4" fill="#101826" stroke="#37506a"/><text x="800" y="315" text-anchor="middle" class="small">HTTP on 127.0.0.1:8080 · static UI + REST + Server-Sent Events</text>
+
+  <!-- Go -->
+  <g filter="url(#shadow)"><rect x="72" y="346" width="1456" height="196" rx="6" fill="#101826" stroke="#2a4056" stroke-width="1.5"/></g>
+  <rect x="72" y="346" width="1456" height="54" rx="6" fill="url(#hero)"/><path d="M72 378v22h1456v-22" fill="url(#hero)"/>
+  <text x="100" y="381" font-size="14" font-weight="700" letter-spacing="1.4" fill="#fff">02 · GO CONTROL PLANE</text><text x="1500" y="381" text-anchor="end" font-size="14" fill="#fff">inferno-api · owns public service + native child lifecycle</text>
+  <line x1="434" y1="419" x2="434" y2="519" stroke="#25364a"/><line x1="798" y1="419" x2="798" y2="519" stroke="#25364a"/><line x1="1162" y1="419" x2="1162" y2="519" stroke="#25364a"/>
+  <text x="100" y="439" class="heading">Gateway &amp; policy</text><text x="100" y="468" class="small">auth → admission → rate → validation</text><text x="100" y="493" class="small">4 public slots · strict body/API bounds</text><text x="100" y="518" class="tiny muted">401 auth · 429 limit/capacity · 503 drain</text>
+  <text x="462" y="439" class="heading">Lifecycle manager</text><text x="462" y="468" class="small">Owns one C++ child after READY + alias</text><text x="462" y="493" class="small">drain · resume · stop · start · join</text><text x="462" y="518" class="tiny muted">no restart loop · hot swap · process scan</text>
+  <text x="826" y="439" class="heading">Bounded observability</text><text x="826" y="468" class="small">128 completed Generate records</text><text x="826" y="493" class="small">60s aggregate window · qualified tails</text><text x="826" y="518" class="tiny muted">handler · RPC · native · scheduler · memory</text>
+  <text x="1190" y="439" class="heading">Model configuration</text><text x="1190" y="468" class="small">Discovery from live READY backend alias</text><text x="1190" y="493" class="small">GGUF preflight + next-start selection</text><text x="1190" y="518" class="tiny muted">Model supplied by user · configuration stored privately</text>
+
+  <path d="M800 542V589" class="lane"/><rect x="521" y="554" width="558" height="34" rx="4" fill="#111827" stroke="#25364a"/><text x="800" y="577" text-anchor="middle" font-size="13" fill="#d9e6f2">localhost gRPC + Protobuf · server-streaming Generate</text>
+  <text x="1110" y="576" class="tiny muted">IDs · deadlines · cancel · status · metrics · raw bytes</text>
+
+  <!-- C++ -->
+  <g filter="url(#shadow)"><rect x="72" y="608" width="1456" height="178" rx="6" class="warm"/></g>
+  <text x="100" y="641" class="label" fill="#67e8f9">03 · C++20 DATA PLANE / NATIVE RUNTIME</text>
+  <rect x="100" y="660" width="280" height="97" rx="4" class="card"/><text x="122" y="687" class="heading">RPC boundary</text><text x="122" y="714" class="small">One outstanding 64 KiB write</text><text x="122" y="738" class="tiny muted">Bounded ID registry · joined waiters</text>
+  <path d="M380 708H432" class="lane"/>
+  <rect x="443" y="660" width="652" height="97" rx="4" class="card"/><text x="465" y="687" class="heading">Bounded scheduler</text><text x="465" y="713" class="small">Queue mode</text><rect x="563" y="695" width="68" height="30" rx="3" fill="#15293c"/><text x="597" y="715" text-anchor="middle" class="tiny">waiting</text><path d="M635 710H680" class="lane"/><rect x="691" y="695" width="76" height="30" rx="3" fill="#0ea5e9"/><text x="729" y="715" text-anchor="middle" class="tiny" fill="#fff">active 1</text>
+  <text x="800" y="713" class="small">Continuous</text><rect x="895" y="695" width="59" height="30" rx="3" fill="#0ea5e9"/><text x="925" y="715" text-anchor="middle" class="tiny" fill="#fff">seq 0</text><rect x="961" y="695" width="59" height="30" rx="3" fill="#0ea5e9"/><text x="991" y="715" text-anchor="middle" class="tiny" fill="#fff">seq 1</text><text x="465" y="745" class="tiny muted">2 waiting · deadlines/cancel · chunked prefill · per-sequence cleanup · joined engine thread</text>
+  <path d="M1095 708H1147" class="lane"/>
+  <rect x="1158" y="660" width="342" height="97" rx="4" class="card"/><text x="1180" y="687" class="heading">Runtime instrumentation</text><text x="1180" y="714" class="small">queue wait · prefill · decode · TTFT</text><text x="1180" y="738" class="tiny muted">token events · lifecycle memory snapshots</text>
+
+  <path d="M800 786V824" class="lane"/>
+  <rect x="160" y="813" width="1280" height="63" rx="6" fill="#111827" stroke="#25364a"/>
+  <text x="190" y="840" font-size="16" font-weight="700" fill="#fff">04 · LLAMA.CPP + METAL</text><text x="190" y="861" font-size="13" fill="#9fb4c7">GGUF metadata &amp; template · tokenization · model/context/cache · Apple unified-memory execution</text>
+  <rect x="1125" y="826" width="282" height="36" rx="6" fill="#111c2b"/><text x="1266" y="849" text-anchor="middle" font-size="14" fill="#d9e6f2">USER-SUPPLIED LOCAL GGUF</text>
+</svg>

@@ -1,0 +1,30 @@
+find_package(Git REQUIRED)
+set(llama_source "${CMAKE_CURRENT_SOURCE_DIR}/third_party/llama.cpp")
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/llama.cpp-revision.txt" llama_pin)
+execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${llama_source}" rev-parse HEAD
+                OUTPUT_VARIABLE llama_revision OUTPUT_STRIP_TRAILING_WHITESPACE
+                RESULT_VARIABLE llama_git_result)
+if(NOT llama_git_result EQUAL 0 OR NOT llama_revision STREQUAL llama_pin)
+    message(FATAL_ERROR "llama.cpp checkout must match the recorded revision")
+endif()
+execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${llama_source}" status --porcelain
+                OUTPUT_VARIABLE llama_changes RESULT_VARIABLE llama_status_result)
+if(NOT llama_status_result EQUAL 0 OR llama_changes)
+    message(FATAL_ERROR "llama.cpp checkout must be clean")
+endif()
+set(llama_build "${CMAKE_CURRENT_SOURCE_DIR}/build/llama-metal")
+find_library(INFERNO_LLAMA_LIBRARY NAMES llama PATHS "${llama_build}/bin" NO_DEFAULT_PATH REQUIRED)
+find_library(INFERNO_GGML_BASE_LIBRARY NAMES ggml-base PATHS "${llama_build}/bin" NO_DEFAULT_PATH REQUIRED)
+add_library(inferno_upstream_llama SHARED IMPORTED)
+set_target_properties(inferno_upstream_llama PROPERTIES
+    IMPORTED_LOCATION "${INFERNO_LLAMA_LIBRARY}"
+    INTERFACE_INCLUDE_DIRECTORIES "${llama_source}/include;${llama_source}/ggml/include")
+add_library(inferno_upstream_ggml_base SHARED IMPORTED)
+set_target_properties(inferno_upstream_ggml_base PROPERTIES IMPORTED_LOCATION "${INFERNO_GGML_BASE_LIBRARY}")
+add_library(inferno_llama_backend src/backend/llama_backend.cpp)
+target_link_libraries(inferno_llama_backend PUBLIC inferno_core PRIVATE inferno_upstream_llama inferno_upstream_ggml_base)
+target_include_directories(inferno_llama_backend PRIVATE "${llama_source}/src")
+set_target_properties(inferno_llama_backend PROPERTIES CXX_EXTENSIONS NO)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(inferno_llama_backend PRIVATE -Wall -Wextra -Wpedantic)
+endif()

@@ -1,0 +1,25 @@
+{
+  "model": "local-nemotron-4b",
+  "model_artifact_sha256": "527db2cf6c705d8fabb95693d038d9c06b4a2b0b8b0a4bbdbd01212d37242970",
+  "quantization": "Q4_K_M",
+  "prompt": "In one sentence, explain why time to first token matters for interactive AI.",
+  "max_tokens": 64,
+  "concurrency_levels": [1, 2, 4],
+  "repetitions_per_client": 3,
+  "request_timeout_seconds": 120,
+  "history_settle_timeout_seconds": 5,
+  "scheduler_poll_interval_ms": 50,
+  "warmup_requests": 1,
+  "runtime_declared": {
+    "native_workers": 1,
+    "native_waiting_queue_capacity": 2,
+    "public_generation_slots": 4,
+    "context_tokens": 4096,
+    "batch_size": 128,
+    "threads": 4,
+    "gpu_layers_requested": 99,
+    "go_rate_per_minute": 60,
+    "go_rate_burst": 4,
+    "go_request_timeout_seconds": 60
+  }
+}

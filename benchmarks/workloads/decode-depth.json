@@ -1,0 +1,11 @@
+{
+  "prompt_tokens": [],
+  "decode_tokens": [32],
+  "decode_depths": [0, 512, 2048],
+  "repetitions": 5,
+  "batch_size": 128,
+  "microbatch_size": 128,
+  "threads": 4,
+  "gpu_layers": 99,
+  "timeout_seconds": 180
+}
