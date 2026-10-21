@@ -6,6 +6,8 @@ PilotLlama serves a user-supplied GGUF through an OpenAI-style streaming API. Go
 owns the control plane; C++20 owns bounded scheduling and llama.cpp/Metal execution;
 React exposes the system in a local observability Studio.
 
+![PilotLlama Studio Console showing two active local generations, scheduler slots, measured decode rates, and memory](docs/assets/pilotllama-studio-console.png)
+
 ![PilotLlama system architecture](docs/assets/pilotllama-architecture.svg)
 
 ## Why PilotLlama?
@@ -39,10 +41,17 @@ Ollama remains broader for model discovery, downloads, and general compatibility
 
 ## Run
 
-Requirements: Apple Silicon macOS, Xcode command-line tools, CMake ≥3.24, Ninja,
-Go ≥1.25, Node/npm and Python 3.12. Setup fetches exact pinned project dependencies
-only after consent. It stays inside the project, never uses `sudo`, and never
-downloads a model.
+Requirements:
+
+- Apple Silicon Mac running macOS
+- Xcode command-line tools
+- CMake ≥3.24 and Ninja
+- Go ≥1.25
+- Node.js and npm
+- Python 3.12
+
+Setup fetches exact pinned project dependencies only after consent. It stays inside
+the project, never uses `sudo`, and never downloads a model.
 
 ```sh
 ./scripts/setup.sh

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Activity, Box, BrainCircuit, Cpu, Gauge, MemoryStick, PauseCircle, PlayCircle, Rows3, Server, Settings2, Zap } from "lucide-react";
+import { Activity, BrainCircuit, Cpu, Gauge, MemoryStick, PauseCircle, PlayCircle, Rows3, Server, Settings2, Zap } from "lucide-react";
 import { control } from "../lib/api";
 import type { ApiSnapshot } from "../lib/types";
 import { formatMetric, formatTime, shortID } from "../lib/utils";
@@ -10,90 +10,32 @@ import { RequestInspector } from "./request-inspector";
 import { ModelManager } from "./model-manager";
 import { SystemHealth } from "./system-health";
 
-function bytes(value: number | null | undefined) {
-  if (value == null || !Number.isFinite(value)) return "Unavailable";
-  return `${(value / 1024 ** 2).toLocaleString(undefined, { maximumFractionDigits: 1 })} MiB`;
-}
-
-function Stat({ label, value, unit }: { label: string; value: string; unit?: string }) {
-  return <div className="console-stat"><p>{label}</p><strong>{value}</strong>{unit ? <span>{unit}</span> : null}</div>;
-}
+const bytes = (value: number | null | undefined) => value == null || !Number.isFinite(value) ? "Unavailable" : `${(value / 1024 ** 2).toLocaleString(undefined, { maximumFractionDigits: 1 })} MiB`;
+function Stat({ label, value, unit, tone = "" }: { label: string; value: string; unit?: string; tone?: string }) { return <div className={`console-stat ${tone}`}><p>{label}</p><strong>{value}</strong>{unit && <span>{unit}</span>}</div>; }
 
 export function OperationsConsole({ snapshot, token, refresh }: { snapshot: ApiSnapshot; token: string; refresh: () => Promise<void> }) {
-  const [busy, setBusy] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const scheduler = snapshot.scheduler;
-  const memory = snapshot.memory;
-  const latest = snapshot.history?.records[0];
-  const model = snapshot.models[0]?.id ?? "No ready model";
-  const saved = snapshot.modelConfig;
-  const backend = snapshot.backend;
-  const admission = snapshot.admission ?? backend?.admission;
-  const process = memory?.process_samples.at(-1);
-  const active = Array.from({ length: 2 }, (_, index) => index < (scheduler?.executing_requests ?? 0));
-  const waiting = Array.from({ length: scheduler?.queue_capacity ?? 2 }, (_, index) => index < (scheduler?.waiting_requests ?? 0));
-
-  async function action(label: string, path: Parameters<typeof control>[0]) {
-    setBusy(label); setMessage(null);
-    try { await control(path, token); setMessage(`${label} completed.`); }
-    catch (error) { setMessage(error instanceof Error ? error.message : `${label} failed.`); }
-    finally { setBusy(null); await refresh(); }
-  }
-
+  const [busy, setBusy] = useState<string | null>(null); const [message, setMessage] = useState<string | null>(null);
+  const scheduler = snapshot.scheduler, memory = snapshot.memory, latest = snapshot.history?.records[0];
+  const backend = snapshot.backend, admission = snapshot.admission ?? backend?.admission, saved = snapshot.modelConfig;
+  const model = snapshot.models[0]?.id ?? "No ready model", process = memory?.process_samples.at(-1);
+  const executing = scheduler?.executing_requests ?? 0, waitingCount = scheduler?.waiting_requests ?? 0;
+  const slots = Math.max(memory?.configuration.sequences ?? 2, 2), queue = scheduler?.queue_capacity ?? 2;
+  const ready = snapshot.ready?.ready === true && backend?.state === "ready", serving = ready && executing > 0;
+  const records = [...(snapshot.history?.records ?? [])].reverse().slice(-16);
+  const rates = records.map((r) => r.native?.decode_tokens_per_second ?? r.receive_tokens_per_second ?? 0);
+  const maxRate = Math.max(...rates, 1);
+  const midRate = maxRate / 2;
+  async function action(label: string, path: Parameters<typeof control>[0]) { setBusy(label); setMessage(null); try { await control(path, token); setMessage(`${label} completed.`); } catch (error) { setMessage(error instanceof Error ? error.message : `${label} failed.`); } finally { setBusy(null); await refresh(); } }
   return <div className="space-y-4">
-    <section className="console-frame">
-      <div className="console-commandbar">
-        <div className="flex min-w-0 items-center gap-3"><span className={`status-beacon ${snapshot.ready?.ready ? "is-ready" : ""}`} /><div className="min-w-0"><p className="truncate text-sm font-semibold text-stone-950">{model}</p><p className="text-[11px] text-stone-500">{backend?.managed ? "Go-managed native runtime" : "Local inference runtime"}</p></div></div>
-        <div className="flex flex-wrap items-center justify-end gap-2"><Badge>{saved?.batching ?? "scheduler unavailable"}</Badge><Badge className={admission?.state === "accepting" ? "border-emerald-600/20 bg-emerald-50 text-emerald-700" : "border-amber-600/20 bg-amber-50 text-amber-700"}>{admission?.state ?? "admission unavailable"}</Badge><Button size="sm" variant="secondary" disabled={!token || !!busy} onClick={() => action("Drain", "/internal/v1/admission/drain")}><PauseCircle size={13}/>Drain</Button><Button size="sm" disabled={!token || !!busy} onClick={() => action("Resume", "/internal/v1/admission/resume")}><PlayCircle size={13}/>Resume</Button></div>
-      </div>
-
-      <div className="grid xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,.75fr)]">
-        <div className="runtime-stage">
-          <div className="flex items-start justify-between gap-4"><div><p className="console-kicker">APPLE SILICON RUNTIME</p><h2>Your Mac, running a visible local AI service.</h2><p className="mt-2 max-w-xl text-sm leading-relaxed text-stone-500">Run a local model for your app, then see its requests, waiting work, response speed, memory, and backend health in one place.</p></div><span className="font-mono text-[10px] text-stone-400">127.0.0.1:8080</span></div>
-          <div className="runtime-board" aria-label="PilotLlama runtime topology">
-            <div className="runtime-chip chip-model"><Box size={17}/><span>GGUF</span><small>{saved?.file_name ?? model}</small></div>
-            <span className="runtime-wire wire-a" />
-            <div className="runtime-chip chip-control"><Server size={17}/><span>GO</span><small>HTTP · policy · lifecycle</small></div>
-            <span className="runtime-wire wire-b" />
-            <div className="runtime-chip chip-native"><Cpu size={17}/><span>C++20</span><small>gRPC · scheduler · metrics</small></div>
-            <span className="runtime-wire wire-c" />
-            <div className="runtime-chip chip-metal"><Zap size={17}/><span>METAL</span><small>llama.cpp execution</small></div>
-            <div className="memory-bus"><MemoryStick size={15}/><span>UNIFIED MEMORY</span><b>{bytes(process?.resident_bytes)}</b></div>
-            <div className="sequence-bank"><span>ACTIVE SEQUENCES</span><div>{active.map((used, index) => <i key={index} className={used ? "is-active" : ""}>SEQ {index}</i>)}</div></div>
-          </div>
-          <div className="console-strip">
-            <Stat label="RPC TTFT · P50" value={formatMetric(snapshot.metrics?.rpc_ttft_ms.p50)} unit="ms"/>
-            <Stat label="Decode · P50" value={formatMetric(snapshot.metrics?.native_decode_tokens_per_second.p50)} unit="tok/s"/>
-            <Stat label="Throughput" value={formatMetric(snapshot.metrics?.completed_native_tokens_per_second, 2)} unit="tok/s"/>
-            <Stat label="Observed" value={snapshot.metrics ? String(snapshot.metrics.samples) : "Unavailable"} unit="requests"/>
-          </div>
-        </div>
-
-        <aside className="runtime-inspector">
-          <div className="flex items-center justify-between"><div><p className="console-kicker">RUNTIME INSPECTOR</p><h3>{model}</h3></div><BrainCircuit size={20} className="text-stone-400"/></div>
-          <dl className="inspector-list"><div><dt>Backend</dt><dd>{backend?.state ?? "Unavailable"}</dd></div><div><dt>Scheduler</dt><dd>{saved?.batching ?? "Unavailable"}</dd></div><div><dt>Context</dt><dd>{memory ? `${memory.configuration.context_tokens.toLocaleString()} tokens` : "Unavailable"}</dd></div><div><dt>Model allocation</dt><dd>{bytes(memory?.llama_model_allocated_bytes)}</dd></div><div><dt>Context allocation</dt><dd>{bytes(memory?.llama_context_allocated_bytes)}</dd></div><div><dt>Physical footprint</dt><dd>{bytes(process?.physical_footprint_bytes)}</dd></div></dl>
-          <p className="mt-4 text-[10px] leading-relaxed text-stone-400">Process memory and llama allocations overlap and are intentionally not summed. Model changes apply on the next start.</p>
-          {message ? <p className="mt-3 rounded-md bg-stone-100 p-2 text-xs text-stone-600">{message}</p> : null}
-        </aside>
-      </div>
+    <section className={`console-frame console-live ${ready ? "is-ready" : ""} ${serving ? "is-serving" : ""}`}>
+      <div className="console-commandbar"><div className="flex min-w-0 items-center gap-3"><span className={`status-beacon ${ready ? "is-ready" : ""}`}/><div className="min-w-0"><p className="truncate text-sm font-semibold text-stone-950">{serving ? "Serving requests now" : ready ? "Service ready" : "Service unavailable"}</p><p className="text-[11px] text-stone-500">{model} · {backend?.managed ? "Go-managed native runtime" : "Local inference runtime"}</p></div></div><div className="flex flex-wrap items-center justify-end gap-2"><Badge>{saved?.batching ?? "scheduler unavailable"}</Badge><Badge className={admission?.state === "accepting" ? "border-emerald-600/20 bg-emerald-50 text-emerald-700" : "border-amber-600/20 bg-amber-50 text-amber-700"}>{admission?.state ?? "admission unavailable"}</Badge><Button size="sm" variant="secondary" disabled={!token || !!busy} onClick={() => action("Drain", "/internal/v1/admission/drain")}><PauseCircle size={13}/>Drain</Button><Button size="sm" disabled={!token || !!busy} onClick={() => action("Resume", "/internal/v1/admission/resume")}><PlayCircle size={13}/>Resume</Button></div></div>
+      <div className="console-dashboard"><div className="console-heading"><div><p className="console-kicker">APPLE SILICON RUNTIME</p><h2>Your Mac, running a visible local AI service.</h2><p className="console-subtitle">Run a local model for your app, then see its requests, waiting work, response speed, memory, and backend health in one place.</p></div><p>127.0.0.1:8080 · refreshed {snapshot.refreshedAt ? formatTime(snapshot.refreshedAt) : "Unavailable"}</p></div>
+        <div className="console-strip console-primary-stats"><Stat label="Active now" value={String(executing)} unit={`/ ${slots} slots`} tone={serving ? "is-green" : ""}/><Stat label="Waiting" value={String(waitingCount)} unit={`/ ${queue} capacity`} tone={waitingCount ? "is-amber" : ""}/><Stat label="Response start · P50" value={formatMetric(snapshot.metrics?.rpc_ttft_ms.p50)} unit="ms"/><Stat label="Decode rate · P50" value={formatMetric(snapshot.metrics?.native_decode_tokens_per_second.p50)} unit="tok/s"/><Stat label="Completed throughput" value={formatMetric(snapshot.metrics?.completed_native_tokens_per_second, 2)} unit="tok/s"/><Stat label="Window samples" value={snapshot.metrics ? String(snapshot.metrics.samples) : "Unavailable"} unit="requests"/></div>
+        <div className="console-density-grid"><div className="console-chart-card"><div className="console-panel-head"><div><p className="console-kicker">RECENT REQUESTS</p><h3>Measured decode rate</h3></div><Activity size={17} className={serving ? "text-emerald-600" : "text-stone-400"}/></div>{rates.length === 1 ? <div className="single-rate"><strong>{formatMetric(rates[0])}</strong><span>tok/s</span><p>One measured completion. Run more prompts to show a trend.</p></div> : rates.length > 1 ? <div className="rate-chart" aria-label="Recent measured decode rates"><div className="rate-axis"><span>{formatMetric(maxRate)}</span><span>{formatMetric(midRate)}</span><span>0</span></div><div className="live-spark">{rates.map((rate, i) => <div className="rate-bar" key={i}><i style={{ height: `${Math.max(8, (rate / maxRate) * 100)}%` }} title={`${formatMetric(rate)} tok/s`}/><b>{formatMetric(rate)}</b></div>)}</div></div> : <p className="console-chart-empty">Run a prompt in Playground to plot real request telemetry.</p>}<p className="chart-caption">Each bar is one retained completion, labeled in tok/s. Missing rates are shown at the baseline.</p></div>
+          <div className="console-health-stack"><div className="console-slot-card"><div className="console-panel-head"><div><p className="console-kicker">SCHEDULER</p><h3>Native slots</h3></div><Rows3 size={17} className="text-stone-400"/></div><div className="slot-row">{Array.from({ length: slots }, (_, i) => <span key={i} className={i < executing ? "active" : ""}><PlayCircle size={13}/>Active {i + 1}</span>)}</div><div className="slot-row mt-2">{Array.from({ length: queue }, (_, i) => <span key={i} className={i < waitingCount ? "waiting" : ""}><Rows3 size={13}/>Wait {i + 1}</span>)}</div></div><div className="console-memory-card"><div><p className="console-kicker">MEMORY</p><h3>{bytes(process?.resident_bytes)}</h3><p>process RSS · peak {bytes(process?.peak_resident_bytes)}</p></div><MemoryStick size={24}/><div className="memory-details"><span>Context</span><b>{bytes(memory?.llama_context_allocated_bytes)}</b><span>Footprint</span><b>{bytes(process?.physical_footprint_bytes)}</b></div></div></div></div>
+      </div>{message && <p className="console-action-message">{message}</p>}
     </section>
-
-    <div className="grid gap-4 xl:grid-cols-[1.05fr_.95fr]">
-      <Card className="overflow-hidden rounded-xl shadow-none">
-        <div className="console-panel-head"><div><p className="console-kicker">NATIVE SCHEDULER</p><h3>Bounded execution</h3></div><span className="text-xs text-stone-500">{scheduler?.backend_state ?? "unavailable"}</span></div>
-        <div className="scheduler-console"><div><p>Executing</p><div className="slot-row">{active.map((used, index) => <span key={index} className={used ? "active" : ""}><PlayCircle size={13}/>Sequence {index}</span>)}</div></div><div><p>Waiting</p><div className="slot-row">{waiting.map((used, index) => <span key={index} className={used ? "waiting" : ""}><Rows3 size={13}/>Slot {index + 1}</span>)}</div></div></div>
-      </Card>
-
-      <Card className="overflow-hidden rounded-xl shadow-none">
-        <div className="console-panel-head"><div><p className="console-kicker">LATEST REQUEST</p><h3>{latest ? shortID(latest.request_id) : "No retained request"}</h3></div>{latest ? <Badge>{latest.outcome}</Badge> : null}</div>
-        {latest ? <div className="grid grid-cols-2 gap-px bg-stone-200 sm:grid-cols-4"><Stat label="Handler" value={formatMetric(latest.handler_latency_ms)} unit="ms"/><Stat label="Native TTFT" value={formatMetric(latest.native?.ttft_ms)} unit="ms"/><Stat label="Decode" value={formatMetric(latest.native?.decode_tokens_per_second)} unit="tok/s"/><Stat label="Finished" value={formatTime(latest.finished_at_unix_ms)}/></div> : <p className="p-5 text-sm text-stone-500">Run a prompt in Playground to populate request telemetry.</p>}
-      </Card>
-    </div>
-
-    <div className="console-disclosures">
-      <details><summary><Activity size={15}/>Request inspector</summary><div className="disclosure-body"><RequestInspector snapshot={snapshot}/></div></details>
-      <details><summary><Settings2 size={15}/>Model configuration</summary><div className="disclosure-body"><ModelManager snapshot={snapshot} token={token} refresh={refresh}/></div></details>
-      <details><summary><Gauge size={15}/>Lifecycle and health controls</summary><div className="disclosure-body"><SystemHealth snapshot={snapshot} token={token} refresh={refresh}/></div></details>
-    </div>
+    <div className="grid gap-4 xl:grid-cols-[.9fr_1.1fr]"><Card className="overflow-hidden rounded-xl shadow-none"><div className="console-panel-head"><div><p className="console-kicker">LATEST REQUEST</p><h3>{latest ? shortID(latest.request_id) : "No retained request"}</h3></div>{latest && <Badge>{latest.outcome}</Badge>}</div>{latest ? <div className="grid grid-cols-2 gap-px bg-stone-200 sm:grid-cols-4"><Stat label="Handler" value={formatMetric(latest.handler_latency_ms)} unit="ms"/><Stat label="Native TTFT" value={formatMetric(latest.native?.ttft_ms)} unit="ms"/><Stat label="Decode" value={formatMetric(latest.native?.decode_tokens_per_second)} unit="tok/s"/><Stat label="Finished" value={formatTime(latest.finished_at_unix_ms)}/></div> : <p className="p-5 text-sm text-stone-500">Run a prompt in Playground to populate request telemetry.</p>}</Card><Card className="overflow-hidden rounded-xl shadow-none"><div className="console-panel-head"><div><p className="console-kicker">RUNTIME AT A GLANCE</p><h3>{model}</h3></div><BrainCircuit size={20} className="text-stone-400"/></div><div className="console-runtime-facts"><span><Server size={14}/> {backend?.state ?? "Unavailable"}</span><span><Cpu size={14}/> {memory ? `${memory.configuration.context_tokens.toLocaleString()} context tokens` : "Context unavailable"}</span><span><Zap size={14}/> {saved?.batching ?? "Scheduler unavailable"}</span><span><Gauge size={14}/> {snapshot.metrics?.retained_records ?? 0} retained records</span></div></Card></div>
+    <div className="console-disclosures"><details><summary><Activity size={15}/>Request inspector</summary><div className="disclosure-body"><RequestInspector snapshot={snapshot}/></div></details><details><summary><Settings2 size={15}/>Model configuration</summary><div className="disclosure-body"><ModelManager snapshot={snapshot} token={token} refresh={refresh}/></div></details><details><summary><Gauge size={15}/>Lifecycle and health controls</summary><div className="disclosure-body"><SystemHealth snapshot={snapshot} token={token} refresh={refresh}/></div></details></div>
   </div>;
 }
