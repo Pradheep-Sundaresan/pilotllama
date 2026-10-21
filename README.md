@@ -67,6 +67,20 @@ Open `http://127.0.0.1:8080/`. Later starts reuse the saved model selection:
 
 Read-only diagnostics: `./scripts/setup.sh --check`.
 
+## Use from your app
+
+1. Start PilotLlama with an existing local GGUF model.
+2. Read the generated local bearer token.
+3. Configure an OpenAI-compatible client with:
+   - base URL: `http://127.0.0.1:8080/v1`
+   - API key: the local bearer token
+   - model: your configured PilotLlama model alias
+4. Send chat-completion requests and stream responses normally.
+
+```text
+Your app → http://127.0.0.1:8080/v1 → PilotLlama → local GGUF on Metal
+```
+
 ## API
 
 ```sh
