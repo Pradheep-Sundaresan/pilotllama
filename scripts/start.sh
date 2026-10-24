@@ -122,7 +122,7 @@ log="$state/service.log"
 [ ! -L "$log" ] || { echo "Refusing symlinked log file: $log" >&2; exit 1; }
 : > "$log"
 
-INFERNO_AUTH_TOKEN=$token nohup "$api" \
+set -- "$api" \
     --listen "$listen" \
     --backend-exec "$backend" \
     --backend-state-dir "$state/backend" \
@@ -133,7 +133,8 @@ INFERNO_AUTH_TOKEN=$token nohup "$api" \
     --model-config-dir "$state" \
     --auth-token-env INFERNO_AUTH_TOKEN \
     --rate-per-minute "$rate" \
-    --rate-burst "$burst" > "$log" 2>&1 &
+    --rate-burst "$burst"
+INFERNO_AUTH_TOKEN=$token nohup "$@" > "$log" 2>&1 &
 pid=$!
 temporary=$(mktemp "$state/service.pid.XXXXXX")
 printf '%s\n' "$pid" > "$temporary"

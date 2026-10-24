@@ -1,12 +1,15 @@
 #include "inferno/llama_backend.hpp"
 #include "inferno/model_prompt.hpp"
 #include "inferno/nemotron_prompt.hpp"
+#include "chat.h"
+#include "common.h"
 #include "llama-ext.h"
 #include "llama.h"
 #include "ggml-backend.h"
 
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <filesystem>
 #include <functional>
 #include <limits>
@@ -21,9 +24,25 @@ constexpr std::size_t max_formatted_prompt_bytes = 1024 * 1024;
 
 struct PromptFormatter {
     ModelPromptMode mode = ModelPromptMode::verified_nemotron_fallback;
-    std::string embedded_template;
+    common_chat_templates_ptr embedded_templates;
     bool continuous_batching_verified = false;
 };
+
+std::string render_embedded_template(const common_chat_templates* templates, std::string_view user_prompt) {
+    common_chat_templates_inputs inputs;
+    inputs.enable_thinking = false;
+    inputs.messages.emplace_back();
+    inputs.messages.back().role = "user";
+    inputs.messages.back().content = user_prompt;
+    const auto rendered = common_chat_templates_apply(templates, inputs).prompt.str();
+    if (rendered.empty()) {
+        throw std::invalid_argument("GGUF chat template rendered an empty prompt");
+    }
+    if (rendered.size() > max_formatted_prompt_bytes) {
+        throw std::invalid_argument("Formatted prompt exceeds the 1 MiB safety limit");
+    }
+    return rendered;
+}
 
 std::string required_model_metadata(const llama_model* model, const char* key) {
     std::array<char, 256> value{};
@@ -48,14 +67,12 @@ PromptFormatter inspect_prompt_formatter(const llama_model* model) {
     result.mode = select_model_prompt_mode(metadata);
     result.continuous_batching_verified = supports_verified_continuous_batching(metadata);
     if (result.mode == ModelPromptMode::embedded_template) {
-        result.embedded_template = raw_template;
-        if (result.embedded_template.size() > max_formatted_prompt_bytes) {
+        if (std::strlen(raw_template) > max_formatted_prompt_bytes) {
             throw std::invalid_argument("GGUF chat template exceeds the 1 MiB safety limit");
         }
-        const llama_chat_message probe{"user", "template compatibility check"};
-        if (llama_chat_apply_template(result.embedded_template.c_str(), &probe, 1, true, nullptr, 0) <= 0) {
-            throw std::invalid_argument("GGUF chat template is unsupported by the pinned llama.cpp revision");
-        }
+        result.embedded_templates = common_chat_templates_init(model, "");
+        if (!result.embedded_templates) throw std::invalid_argument("Could not initialize the GGUF chat template");
+        (void) render_embedded_template(result.embedded_templates.get(), "template compatibility check");
     }
     return result;
 }
@@ -65,23 +82,7 @@ std::string format_model_prompt(const PromptFormatter& formatter, std::string_vi
     if (formatter.mode == ModelPromptMode::verified_nemotron_fallback) {
         return format_nemotron_prompt(user_prompt);
     }
-    const std::string content(user_prompt);
-    const llama_chat_message message{"user", content.c_str()};
-    const auto required = llama_chat_apply_template(
-        formatter.embedded_template.c_str(), &message, 1, true, nullptr, 0);
-    if (required <= 0) {
-        throw std::invalid_argument("Could not apply the model's embedded chat template");
-    }
-    if (static_cast<std::size_t>(required) > max_formatted_prompt_bytes) {
-        throw std::invalid_argument("Formatted prompt exceeds the 1 MiB safety limit");
-    }
-    std::string prompt(static_cast<std::size_t>(required), '\0');
-    const auto written = llama_chat_apply_template(formatter.embedded_template.c_str(), &message, 1,
-                                                    true, prompt.data(), required);
-    if (written != required) {
-        throw std::runtime_error("Model chat-template formatting changed unexpectedly");
-    }
-    return prompt;
+    return render_embedded_template(formatter.embedded_templates.get(), user_prompt);
 }
 
 struct BackendSession {

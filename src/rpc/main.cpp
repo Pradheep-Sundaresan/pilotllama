@@ -59,7 +59,8 @@ int main(int argc, char** argv) {
     try {
         std::unique_ptr<inferno::GenerationRuntime> runtime;
         if (batching == "continuous") {
-            runtime = std::make_unique<inferno::ContinuousBatchEngine>(inferno::make_llama_batch_executor({model}));
+            runtime = std::make_unique<inferno::ContinuousBatchEngine>(
+                inferno::make_llama_batch_executor(inferno::LlamaModelConfig{.path = model}));
         } else {
             runtime = std::make_unique<inferno::Runtime>(inferno::make_llama_backend({model}), 2);
         }

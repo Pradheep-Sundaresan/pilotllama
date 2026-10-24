@@ -17,7 +17,8 @@ cmake -S third_party/llama.cpp -B build/llama-metal -G Ninja \
     -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON \
     -DGGML_OPENMP=OFF -DGGML_CPU_KLEIDIAI=OFF -DGGML_CCACHE=OFF \
     -DLLAMA_OPENSSL=OFF -DLLAMA_BUILD_BORINGSSL=OFF -DLLAMA_BUILD_LIBRESSL=OFF \
+    -DLLAMA_BUILD_COMMON=ON \
     -DLLAMA_BUILD_SERVER=OFF -DLLAMA_BUILD_APP=OFF \
     -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF \
     -DLLAMA_BUILD_TOOLS=ON -DLLAMA_TOOLS_INSTALL=OFF -DLLAMA_TESTS_INSTALL=OFF
-cmake --build build/llama-metal --target llama-completion llama-bench -j 4
+cmake --build build/llama-metal --target llama-completion llama-bench llama-common -j 4
