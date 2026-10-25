@@ -35,9 +35,11 @@ history, metrics, admission, and backend-control endpoints intentionally return 
 - **Overview** polls the bounded 60-second aggregate report and request history every
   five seconds. It shows real RPC TTFT, native decode rate, completion-attributed
   throughput, request outcomes, empirical quantiles, and recent handler latency.
-- **Playground** discovers the live model alias and sends the supported single-user,
-  temperature-zero request. It supports both JSON and SSE output, cancellation, token
-  limits from 1–512, and shows the returned request ID.
+- **Playground** discovers the live model alias and keeps a bounded multi-turn
+  conversation with an optional leading system message. It supports both JSON and SSE
+  output, cancellation, bounded temperature/top-p/top-k/seed/stop controls, token limits from 1 through the
+  loaded runtime's configured output budget, and shows the returned request ID. A
+  supported model can opt into a separate live reasoning panel.
 - **Request Inspector** renders the retained 128-entry history without prompts or
   outputs. It keeps Go/RPC and native measurements separate and preserves nulls.
 - **System Health** shows public health/readiness plus authenticated backend and

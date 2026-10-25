@@ -18,10 +18,12 @@ import (
 )
 
 type chatBackend struct {
-	generate  func(context.Context, *pb.GenerateRequest, func([]byte) error) (rpcbackend.Observation, error)
-	state     pb.BackendState
-	scheduler *pb.SchedulerSnapshot
-	memory    *pb.MemorySnapshot
+	generate       func(context.Context, *pb.GenerateRequest, func([]byte) error) (rpcbackend.Observation, error)
+	generatePieces func(context.Context, *pb.GenerateRequest, func(rpcbackend.OutputPiece) error) (rpcbackend.Observation, error)
+	state          pb.BackendState
+	scheduler      *pb.SchedulerSnapshot
+	memory         *pb.MemorySnapshot
+	capabilities   *pb.ModelCapabilities
 }
 
 func (b *chatBackend) Close() error { return nil }
@@ -31,13 +33,51 @@ func (b *chatBackend) Status(context.Context) (rpcbackend.StatusObservation, err
 	if state == 0 {
 		state = pb.BackendState_BACKEND_STATE_READY
 	}
-	return rpcbackend.StatusObservation{Response: &pb.GetStatusResponse{State: state, ModelId: &model, Scheduler: b.scheduler, Memory: b.memory}}, nil
+	return rpcbackend.StatusObservation{Response: &pb.GetStatusResponse{State: state, ModelId: &model, Scheduler: b.scheduler, Memory: b.memory, ModelCapabilities: b.capabilities}}, nil
 }
 func (b *chatBackend) Generate(ctx context.Context, r *pb.GenerateRequest, f func([]byte) error) (rpcbackend.Observation, error) {
 	return b.generate(ctx, r, f)
 }
+func (b *chatBackend) GeneratePieces(ctx context.Context, request *pb.GenerateRequest, consume func(rpcbackend.OutputPiece) error) (rpcbackend.Observation, error) {
+	if b.generatePieces != nil {
+		return b.generatePieces(ctx, request, consume)
+	}
+	return b.Generate(ctx, request, func(piece []byte) error {
+		return consume(rpcbackend.OutputPiece{Bytes: piece, Channel: pb.TokenChannel_TOKEN_CHANNEL_CONTENT, AdvancesOutputTokens: true})
+	})
+}
+
+func TestChatSeparatesReasoningInJSONAndSSE(t *testing.T) {
+	backend := &chatBackend{
+		generate: func(context.Context, *pb.GenerateRequest, func([]byte) error) (rpcbackend.Observation, error) {
+			t.Fatal("used legacy consumer")
+			return rpcbackend.Observation{}, nil
+		},
+		generatePieces: func(_ context.Context, request *pb.GenerateRequest, consume func(rpcbackend.OutputPiece) error) (rpcbackend.Observation, error) {
+			if !request.EnableThinking {
+				t.Fatal("thinking flag not forwarded")
+			}
+			if err := consume(rpcbackend.OutputPiece{Bytes: []byte("because"), Channel: pb.TokenChannel_TOKEN_CHANNEL_REASONING, AdvancesOutputTokens: true}); err != nil {
+				return rpcbackend.Observation{}, err
+			}
+			if err := consume(rpcbackend.OutputPiece{Bytes: []byte("answer"), Channel: pb.TokenChannel_TOKEN_CHANNEL_CONTENT, AdvancesOutputTokens: true}); err != nil {
+				return rpcbackend.Observation{}, err
+			}
+			return success(2), nil
+		},
+	}
+	request := `{"model":"test-model","messages":[{"role":"user","content":"reasoning"}],"max_tokens":4,"thinking":true}`
+	jsonResponse := invoke(chatService(backend), request)
+	if jsonResponse.Code != 200 || !strings.Contains(jsonResponse.Body.String(), `"reasoning_content":"because"`) || !strings.Contains(jsonResponse.Body.String(), `"content":"answer"`) {
+		t.Fatal(jsonResponse.Code, jsonResponse.Body)
+	}
+	streamResponse := invoke(chatService(backend), strings.TrimSuffix(request, "}")+`,"stream":true}`)
+	if streamResponse.Code != 200 || !strings.Contains(streamResponse.Body.String(), `"reasoning_content":"because"`) || !strings.Contains(streamResponse.Body.String(), `"content":"answer"`) || !strings.Contains(streamResponse.Body.String(), "[DONE]") {
+		t.Fatal(streamResponse.Code, streamResponse.Body)
+	}
+}
 func chatService(b *chatBackend) *Service {
-	return &Service{rpc: b, active: make(chan struct{}, 4), requestTimeout: time.Second}
+	return &Service{rpc: b, active: make(chan struct{}, 4), requestTimeout: time.Second, maxOutputTokens: 512}
 }
 func body(stream bool) string {
 	if stream {
@@ -61,7 +101,8 @@ func TestChatJSONAndSSE(t *testing.T) {
 		if _, ok := ctx.Deadline(); !ok {
 			t.Error("missing outgoing budget")
 		}
-		if r.RequestId == 0 || r.Prompt != "hi" || r.MaxOutputTokens != 4 {
+		if r.RequestId == 0 || r.Prompt != "" || len(r.Messages) != 1 ||
+			r.Messages[0].Role != pb.ChatRole_CHAT_ROLE_USER || r.Messages[0].Content != "hi" || r.MaxOutputTokens != 4 {
 			t.Error("request mapping")
 		}
 		for _, piece := range [][]byte{{0xf0, 0x9f}, {0x98, 0x80}, nil, {'!'}} {
@@ -123,6 +164,100 @@ func TestChatJSONAndSSE(t *testing.T) {
 	}
 }
 
+func TestChatMapsSystemAndMultiTurnHistory(t *testing.T) {
+	backend := &chatBackend{generate: func(_ context.Context, request *pb.GenerateRequest, _ func([]byte) error) (rpcbackend.Observation, error) {
+		wantRoles := []pb.ChatRole{pb.ChatRole_CHAT_ROLE_SYSTEM, pb.ChatRole_CHAT_ROLE_USER, pb.ChatRole_CHAT_ROLE_ASSISTANT, pb.ChatRole_CHAT_ROLE_USER}
+		if request.Prompt != "" || len(request.Messages) != len(wantRoles) {
+			t.Fatalf("request=%+v", request)
+		}
+		for index, role := range wantRoles {
+			if request.Messages[index].Role != role {
+				t.Fatalf("role[%d]=%v", index, request.Messages[index].Role)
+			}
+		}
+		return success(0), nil
+	}}
+	s := chatService(backend)
+	w := invoke(s, `{"model":"test-model","messages":[{"role":"system","content":"brief"},{"role":"user","content":"one"},{"role":"assistant","content":"answer"},{"role":"user","content":"two"}],"max_tokens":4}`)
+	if w.Code != 200 {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body)
+	}
+}
+
+func TestChatUsesConfiguredOutputBudget(t *testing.T) {
+	backend := &chatBackend{generate: func(_ context.Context, request *pb.GenerateRequest, _ func([]byte) error) (rpcbackend.Observation, error) {
+		if request.MaxOutputTokens != 1024 {
+			t.Fatalf("output=%d", request.MaxOutputTokens)
+		}
+		return success(0), nil
+	}}
+	s := chatService(backend)
+	s.maxOutputTokens = 1024
+	accepted := invoke(s, `{"model":"test-model","messages":[{"role":"user","content":"hi"}],"max_tokens":1024}`)
+	if accepted.Code != 200 {
+		t.Fatalf("accepted=%d %s", accepted.Code, accepted.Body)
+	}
+	rejected := invoke(s, `{"model":"test-model","messages":[{"role":"user","content":"hi"}],"max_tokens":1025}`)
+	if rejected.Code != 400 || !strings.Contains(rejected.Body.String(), "1..1024") {
+		t.Fatalf("rejected=%d %s", rejected.Code, rejected.Body)
+	}
+}
+
+func TestChatForwardsSamplingControls(t *testing.T) {
+	backend := &chatBackend{generate: func(_ context.Context, request *pb.GenerateRequest, _ func([]byte) error) (rpcbackend.Observation, error) {
+		if request.Temperature != 0.7 || request.TopP != 0.8 || request.TopK != 40 || request.Seed == nil || *request.Seed != 42 ||
+			len(request.Stop) != 2 || request.Stop[0] != "END" || request.Stop[1] != "###" {
+			t.Fatalf("sampling not forwarded: %+v", request)
+		}
+		return success(0), nil
+	}}
+	w := invoke(chatService(backend), `{"model":"test-model","messages":[{"role":"user","content":"hi"}],"max_tokens":4,"temperature":0.7,"top_p":0.8,"top_k":40,"seed":42,"stop":["END","###"]}`)
+	if w.Code != 200 {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body)
+	}
+}
+
+func TestChatForwardsToolDefinitions(t *testing.T) {
+	backend := &chatBackend{generate: func(_ context.Context, request *pb.GenerateRequest, _ func([]byte) error) (rpcbackend.Observation, error) {
+		if request.ToolChoice != pb.ToolChoice_TOOL_CHOICE_REQUIRED || len(request.Tools) != 1 || request.Tools[0].Name != "weather" ||
+			request.Tools[0].Description != "Read weather" || request.Tools[0].ParametersJson != `{"type":"object"}` {
+			t.Fatalf("tools not forwarded: %+v", request)
+		}
+		return success(0), nil
+	}}
+	w := invoke(chatService(backend), `{"model":"test-model","messages":[{"role":"user","content":"hi"}],"max_tokens":4,"tools":[{"type":"function","function":{"name":"weather","description":"Read weather","parameters":{"type":"object"}}}],"tool_choice":"required"}`)
+	if w.Code != 200 {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body)
+	}
+}
+
+func TestChatForwardsToolResultsAndStructuredOutput(t *testing.T) {
+	backend := &chatBackend{generate: func(_ context.Context, request *pb.GenerateRequest, _ func([]byte) error) (rpcbackend.Observation, error) {
+		if len(request.Messages) != 5 || request.Messages[1].ToolCalls[0].Id != "call_1" || request.Messages[2].Role != pb.ChatRole_CHAT_ROLE_TOOL || request.Messages[2].ToolCallId != "call_1" {
+			t.Fatalf("tool history not forwarded: %+v", request.Messages)
+		}
+		return success(0), nil
+	}}
+	w := invoke(chatService(backend), `{"model":"test-model","messages":[{"role":"user","content":"weather"},{"role":"assistant","content":"","tool_calls":[{"id":"call_1","type":"function","function":{"name":"weather","arguments":"{\"city\":\"Chennai\"}"}}]},{"role":"tool","tool_call_id":"call_1","content":"sunny"},{"role":"assistant","content":"It is sunny"},{"role":"user","content":"summarize"}],"max_tokens":4}`)
+	if w.Code != 200 {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body)
+	}
+
+	backend.generate = func(_ context.Context, request *pb.GenerateRequest, consume func([]byte) error) (rpcbackend.Observation, error) {
+		if request.ResponseFormat != pb.ResponseFormat_RESPONSE_FORMAT_JSON_SCHEMA || request.ResponseSchemaJson != `{"type":"object","properties":{"answer":{"type":"integer"}},"required":["answer"]}` {
+			t.Fatalf("response format not forwarded: %+v", request)
+		}
+		if err := consume([]byte(`{"answer":4}`)); err != nil {
+			return rpcbackend.Observation{}, err
+		}
+		return success(1), nil
+	}
+	w = invoke(chatService(backend), `{"model":"test-model","messages":[{"role":"user","content":"json"}],"max_tokens":4,"response_format":{"type":"json_schema","json_schema":{"name":"answer","strict":true,"schema":{"type":"object","properties":{"answer":{"type":"integer"}},"required":["answer"]}}}}`)
+	if w.Code != 200 {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body)
+	}
+}
+
 func TestChatRequestValidation(t *testing.T) {
 	backend := &chatBackend{generate: func(context.Context, *pb.GenerateRequest, func([]byte) error) (rpcbackend.Observation, error) {
 		t.Fatal("invalid request reached generation")
@@ -135,8 +270,8 @@ func TestChatRequestValidation(t *testing.T) {
 		{"malformed", "{", 400}, {"trailing", body(false) + "{}", 400}, {"empty", "{}", 400},
 		{"role", strings.Replace(body(false), `"user"`, `"system"`, 1), 400},
 		{"multiple", `{"model":"test-model","messages":[{"role":"user","content":"a"},{"role":"user","content":"b"}]}`, 400},
-		{"sampling", strings.Replace(body(false), `"max_tokens":4`, `"temperature":0.5`, 1), 400},
-		{"tools", strings.Replace(body(false), `"max_tokens":4`, `"tools":[]`, 1), 400},
+		{"sampling", strings.Replace(body(false), `"max_tokens":4`, `"temperature":2.1`, 1), 400},
+		{"tools", strings.Replace(body(false), `"max_tokens":4`, `"tools":[{"type":"function","function":{"name":"bad name","parameters":{}}}]`, 1), 400},
 		{"usage", strings.Replace(body(false), `"max_tokens":4`, `"stream_options":{"include_usage":true}`, 1), 400},
 		{"zero-limit", strings.Replace(body(false), `"max_tokens":4`, `"max_tokens":0`, 1), 400},
 		{"both-limits", strings.Replace(body(false), `"max_tokens":4`, `"max_tokens":4,"max_completion_tokens":4`, 1), 400},

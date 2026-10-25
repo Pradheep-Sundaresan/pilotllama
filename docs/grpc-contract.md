@@ -40,7 +40,7 @@ not in generated code. Proto3 `optional` preserves unavailable numeric metrics.
 | RPC | Contract |
 | --- | --- |
 | `GetStatus` | Unary. A successful response proves process liveness. Only `BACKEND_STATE_READY` means model/runtime readiness. Other states: no model, loading, draining, failed. Optional model ID is a caller-supplied alias, not a verified artifact hash or filesystem path. It includes a point-in-time C++ scheduler snapshot and may include Phase 5B's bounded memory snapshot. Queue-full does not make a loaded runtime unready. No model load/download is triggered. |
-| `Generate` | Server-streaming. Nonzero uint64 ID unique among active requests, UTF-8 prompt, explicit output limit 1–512. Use existing native prompt validation (65536-byte input cap, no embedded template delimiters, context-budget check). Deadline lives in the gRPC context. |
+| `Generate` | Server-streaming. Nonzero uint64 ID unique among active requests, 1–64 structured chat messages totaling at most 1 MiB, an explicit output limit, bounded sampling/seed/stop controls, and at most 16 bounded function-tool definitions with `none`/`auto`/`required` choice. Roles and tool contracts are validated before admission; llama.cpp renders the complete history and enforces detected capabilities plus the tokenized context budget. The incremental parser emits typed `CONTENT`, `REASONING`, and indexed `TOOL_CALL` events; tool arguments are bounded incremental bytes and must finish as a JSON object with a submitted name. The legacy prompt field remains for internal fixtures. Deadline lives in the gRPC context. |
 | `Cancel` | Unary. Nonzero ID. Returns requested, already requested, or finished while the request is retained. Unknown/retired ID returns NOT_FOUND. Intent is not completion; queued items retain their slots until dequeue. |
 
 The initial backend and Go dial target must use explicit loopback IPs only, with
@@ -56,9 +56,10 @@ No remote exposure is authorized now.
 For an admitted request, send `accepted`, zero or more `token` events, exactly one
 `finished` event, then OK trailers. All events carry the same request ID. Accepted
 means queued/admitted ownership, not that GPU execution has begun. Immediate EOG
-may produce zero token events. One token record represents exactly one native
-non-EOG event, including empty pieces; `output_tokens` starts at 1 and increases
-by exactly 1. `Finished.metrics.output_tokens` must equal the emitted native event
+may produce zero token events. Each native non-EOG token produces one event with
+`advances_output_tokens=true`; the parser may also flush a non-empty semantic
+fragment with the flag false and an unchanged count. `output_tokens` starts at 1
+and increases only for native events. `Finished.metrics.output_tokens` must equal the native event
 count for a completed stream. `Finished` has a nonzero terminal state,
 metrics (including measured runtime latency), and an error for non-completed states.
 For non-completed states, native counts can exceed delivered records if a callback
@@ -66,12 +67,14 @@ failed after the runtime counted an event; retain the measured count rather than
 fabricating a missing token. Final text is not repeated. Partial bytes cannot be
 retracted after failure.
 
-Token pieces use protobuf `bytes`: a native token can split UTF-8. Go must join
-incomplete code points when producing valid public JSON/SSE text. It must retain
+Token pieces use protobuf `bytes`: a parsed fragment can split UTF-8. Every event has
+an explicit content/reasoning channel; unspecified channels and reasoning on a
+disabled request are protocol errors. Go must join incomplete code points when
+producing valid public JSON/SSE text. It must retain
 the native token count independently of the number of public text chunks. Invalid
 UTF-8 at stream completion is an explicit public stream error, not silent replacement.
 
-Initial implementation limits: 128 KiB serialized protobuf message size, 64 KiB
+Current limits: 2 MiB serialized protobuf message size, 64 KiB
 maximum token piece, and at most 64 KiB of pending token payload per request (a
 single oversized piece fails explicitly). Error messages are bounded to 2 KiB of
 UTF-8 and must not include prompts, secrets or local paths. Configure equivalent

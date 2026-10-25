@@ -27,16 +27,17 @@ import (
 )
 
 type Config struct {
-	Listen         string
-	Backend        string
-	BackendGRPC    string
-	RequestTimeout time.Duration
-	AuthToken      string // Optional local bearer secret; never log Config or this field.
-	RatePerMinute  int    // Zero disables the shared generation request limiter.
-	RateBurst      int    // Zero selects one request when rate limiting is enabled.
-	StudioDir      string // Optional absolute production bundle directory.
-	ModelConfigDir string // Optional private directory used by the next-start model selector.
-	ManagedBackend ManagedBackend
+	Listen          string
+	Backend         string
+	BackendGRPC     string
+	RequestTimeout  time.Duration
+	MaxOutputTokens int    // Public per-request cap; must match the native runtime configuration.
+	AuthToken       string // Optional local bearer secret; never log Config or this field.
+	RatePerMinute   int    // Zero disables the shared generation request limiter.
+	RateBurst       int    // Zero selects one request when rate limiting is enabled.
+	StudioDir       string // Optional absolute production bundle directory.
+	ModelConfigDir  string // Optional private directory used by the next-start model selector.
+	ManagedBackend  ManagedBackend
 }
 
 // Only explicit loopback IPs are accepted; no DNS or wildcard binding.
@@ -80,6 +81,9 @@ func (c Config) Validate() error {
 	if c.RequestTimeout < 0 || c.RequestTimeout > time.Hour {
 		return errors.New("request timeout must be positive and at most one hour (zero selects default)")
 	}
+	if c.MaxOutputTokens < 0 || c.MaxOutputTokens > 1048576 {
+		return errors.New("maximum output tokens must be 1..1048576 (zero selects 512)")
+	}
 	if err := loopbackAddress(c.Listen); err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
@@ -120,6 +124,7 @@ type Service struct {
 	ids                atomic.Uint64
 	active             chan struct{}
 	requestTimeout     time.Duration
+	maxOutputTokens    int
 	authDigest         *[32]byte
 	limiter            *requestLimiter
 	admissionMu        sync.Mutex
@@ -136,6 +141,7 @@ type Service struct {
 type inferenceClient interface {
 	Status(context.Context) (rpcbackend.StatusObservation, error)
 	Generate(context.Context, *pb.GenerateRequest, func([]byte) error) (rpcbackend.Observation, error)
+	GeneratePieces(context.Context, *pb.GenerateRequest, func(rpcbackend.OutputPiece) error) (rpcbackend.Observation, error)
 	Close() error
 }
 
@@ -150,7 +156,11 @@ func New(c Config) (*Service, error) {
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
-	s := &Service{active: make(chan struct{}, 4), requestTimeout: c.RequestTimeout, observedSince: time.Now()}
+	s := &Service{active: make(chan struct{}, 4), requestTimeout: c.RequestTimeout,
+		maxOutputTokens: c.MaxOutputTokens, observedSince: time.Now()}
+	if s.maxOutputTokens == 0 {
+		s.maxOutputTokens = 512
+	}
 	s.modelConfigDir = c.ModelConfigDir
 	if c.StudioDir != "" {
 		s.studio = os.DirFS(c.StudioDir)
@@ -264,9 +274,11 @@ func (s *Service) Handler() http.Handler {
 		mux.Handle("GET /internal/v1/metrics", s.control(http.HandlerFunc(s.aggregateMetrics)))
 		mux.Handle("GET /internal/v1/scheduler", s.control(http.HandlerFunc(s.schedulerStatus)))
 		mux.Handle("GET /internal/v1/memory", s.control(http.HandlerFunc(s.memoryStatus)))
+		mux.Handle("GET /internal/v1/model-capabilities", s.control(http.HandlerFunc(s.modelCapabilities)))
 		if s.modelConfigDir != "" {
 			mux.Handle("GET /internal/v1/model-config", s.control(http.HandlerFunc(s.modelConfig)))
 			mux.Handle("PUT /internal/v1/model-config", s.control(http.HandlerFunc(s.modelConfig)))
+			mux.Handle("POST /internal/v1/model-config/apply", s.control(http.HandlerFunc(s.applyModelConfig)))
 		}
 	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {

@@ -18,6 +18,8 @@ func main() {
 	c := service.Config{}
 	managed := backendprocess.Config{}
 	var authTokenEnv string
+	var contextTokens uint
+	var maxOutputTokens uint
 	flag.StringVar(&authTokenEnv, "auth-token-env", "", "opt-in bearer auth: name of environment variable holding a 32..256 character local token")
 	flag.IntVar(&c.RatePerMinute, "rate-per-minute", 0, "shared generation requests/minute, 0 disables, maximum 60000")
 	flag.IntVar(&c.RateBurst, "rate-burst", 0, "generation burst allowance, 0 selects one when rate enabled, maximum 1024")
@@ -25,6 +27,9 @@ func main() {
 	flag.StringVar(&managed.Model, "model", "", "absolute existing local GGUF for managed backend; never downloaded")
 	flag.StringVar(&managed.ModelID, "model-id", "local-nemotron-4b", "managed backend model alias")
 	flag.StringVar(&managed.Batching, "backend-batching", "queue", "managed native scheduler: queue or continuous")
+	flag.BoolVar(&managed.QualifyContinuous, "backend-qualify-continuous", false, "allow continuous mode only for an externally qualified exact local model")
+	flag.UintVar(&contextTokens, "context-tokens", 4096, "native context budget in tokens, bounded by the loaded model")
+	flag.UintVar(&maxOutputTokens, "max-output-tokens", 512, "maximum generated tokens per request")
 	flag.StringVar(&managed.StateDir, "backend-state-dir", "build/backend", "project-local managed backend state directory")
 	flag.DurationVar(&managed.StartupTimeout, "backend-startup-timeout", 2*time.Minute, "managed backend readiness budget, at most 1h")
 	flag.DurationVar(&managed.ShutdownTimeout, "backend-shutdown-timeout", 15*time.Second, "managed child shutdown grace before kill, at most 1m")
@@ -35,6 +40,12 @@ func main() {
 	flag.StringVar(&c.ModelConfigDir, "model-config-dir", "", "optional absolute private next-start model configuration directory")
 	flag.DurationVar(&c.RequestTimeout, "request-timeout", time.Minute, "generation request budget (positive, at most 1h)")
 	flag.Parse()
+	if contextTokens > 1048576 || maxOutputTokens > 1048576 {
+		slog.Error("context or output token budget exceeds supported bound")
+		os.Exit(2)
+	}
+	managed.ContextTokens, managed.MaxOutputTokens = uint32(contextTokens), uint32(maxOutputTokens)
+	c.MaxOutputTokens = int(maxOutputTokens)
 	if authTokenEnv != "" {
 		var ok bool
 		c.AuthToken, ok = os.LookupEnv(authTokenEnv)

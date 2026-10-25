@@ -119,10 +119,31 @@ export type ModelConfig = {
   file_name: string;
   model_id: string;
   batching: "queue" | "continuous";
+  context_tokens: number;
+  max_output_tokens: number;
   size_bytes: number;
   format: "GGUF";
   preflight_level: "container_header_only";
   restart_needed: boolean;
+};
+
+export type ModelCapabilities = {
+  observed_at_unix_ms: number;
+  source: "cpp_loaded_gguf_capability_probe";
+  backend_state: string;
+  status_rpc_latency_ms: number;
+  architecture: string;
+  parameter_count: number;
+  trained_context_tokens: number;
+  configured_context_tokens: number;
+  configured_max_output_tokens: number;
+  has_encoder: boolean;
+  has_decoder: boolean;
+  has_embedded_chat_template: boolean;
+  compatibility: "compatible" | "verified";
+  template_source: "embedded" | "verified_fallback";
+  capabilities: Record<"queue_mode" | "continuous_mode" | "system_messages" | "multi_turn" | "thinking" | "tools", "unavailable" | "detected" | "verified" | "unqualified" | "unknown">;
+  driving_test?: { observed_at_unix_ms: number; model_id: string; file_name: string; grade: "verified" | "compatible" | "experimental" | "unsupported"; checks: Record<string, boolean>; continuous_qualified: boolean; physical_memory_bytes?: number; method: "bounded_local_driving_test" };
 };
 
 export type Health = { healthy?: boolean; ready?: boolean; reason?: string };
@@ -138,8 +159,10 @@ export type ApiSnapshot = {
   memory: MemoryReport | null;
   models: ModelRecord[];
   modelConfig: ModelConfig | null;
+  modelCapabilities: ModelCapabilities | null;
   error: string | null;
   refreshedAt: number | null;
 };
 
-export type StreamResult = { text: string; requestID: string | null };
+export type ToolCall = { id: string; type: "function"; function: { name: string; arguments: string } };
+export type StreamResult = { text: string; reasoning: string; toolCalls: ToolCall[]; requestID: string | null };

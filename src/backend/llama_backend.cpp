@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <functional>
@@ -26,14 +27,101 @@ struct PromptFormatter {
     ModelPromptMode mode = ModelPromptMode::verified_nemotron_fallback;
     common_chat_templates_ptr embedded_templates;
     bool continuous_batching_verified = false;
+    ModelCapabilities capabilities;
 };
 
-std::string render_embedded_template(const common_chat_templates* templates, std::string_view user_prompt) {
+struct ParsedPiece {
+    std::string bytes;
+    OutputChannel channel = OutputChannel::content;
+    std::uint32_t tool_call_index = 0;
+    std::string tool_call_id;
+    std::string tool_name;
+};
+
+class StopFilter {
+public:
+    explicit StopFilter(std::vector<std::string> stops = {}) : stops_(std::move(stops)) {
+        for (const auto& stop : stops_) max_ = std::max(max_, stop.size());
+    }
+
+    std::vector<ParsedPiece> push(ParsedPiece piece, bool& stopped) {
+        std::vector<ParsedPiece> result;
+        if (stops_.empty()) { result.push_back(std::move(piece)); return result; }
+        if (channel_ && *channel_ != piece.channel) flush_into(result);
+        channel_ = piece.channel;
+        pending_ += piece.bytes;
+        std::size_t match = std::string::npos;
+        for (const auto& stop : stops_) match = std::min(match, pending_.find(stop));
+        if (match != std::string::npos) {
+            if (match) result.push_back({pending_.substr(0, match), *channel_});
+            pending_.clear();
+            stopped = true;
+            return result;
+        }
+        const auto keep = max_ > 0 ? max_ - 1 : 0;
+        if (pending_.size() > keep) {
+            const auto emit = pending_.size() - keep;
+            result.push_back({pending_.substr(0, emit), *channel_});
+            pending_.erase(0, emit);
+        }
+        return result;
+    }
+
+    std::vector<ParsedPiece> finish() {
+        std::vector<ParsedPiece> result;
+        flush_into(result);
+        return result;
+    }
+
+private:
+    void flush_into(std::vector<ParsedPiece>& result) {
+        if (!pending_.empty() && channel_) result.push_back({std::move(pending_), *channel_});
+        pending_.clear();
+    }
+    std::vector<std::string> stops_;
+    std::optional<OutputChannel> channel_;
+    std::string pending_;
+    std::size_t max_ = 0;
+};
+
+struct PreparedPrompt {
+    std::string prompt;
+    std::unique_ptr<common_chat_session> session;
+    common_chat_msg parsed;
+    std::size_t output_bytes = 0;
+    std::vector<ToolDefinition> tools;
+};
+
+common_chat_templates_inputs template_inputs(std::span<const ChatMessage> messages, bool enable_thinking,
+                                             std::span<const ToolDefinition> tools = {},
+                                             ToolChoice tool_choice = ToolChoice::none) {
     common_chat_templates_inputs inputs;
-    inputs.enable_thinking = false;
-    inputs.messages.emplace_back();
-    inputs.messages.back().role = "user";
-    inputs.messages.back().content = user_prompt;
+    inputs.enable_thinking = enable_thinking;
+    for (const auto& tool : tools) inputs.tools.push_back({tool.name, tool.description, tool.parameters_json});
+    switch (tool_choice) {
+    case ToolChoice::none: inputs.tool_choice = COMMON_CHAT_TOOL_CHOICE_NONE; break;
+    case ToolChoice::automatic: inputs.tool_choice = COMMON_CHAT_TOOL_CHOICE_AUTO; break;
+    case ToolChoice::required: inputs.tool_choice = COMMON_CHAT_TOOL_CHOICE_REQUIRED; break;
+    }
+    inputs.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
+    for (const auto& message : messages) {
+        inputs.messages.emplace_back();
+        switch (message.role) {
+        case ChatRole::system: inputs.messages.back().role = "system"; break;
+        case ChatRole::user: inputs.messages.back().role = "user"; break;
+        case ChatRole::assistant: inputs.messages.back().role = "assistant"; break;
+        case ChatRole::tool: inputs.messages.back().role = "tool"; break;
+        }
+        inputs.messages.back().content = message.content;
+        inputs.messages.back().tool_call_id = message.tool_call_id;
+        for (const auto& call : message.tool_calls)
+            inputs.messages.back().tool_calls.push_back({call.name, call.arguments_json, call.id});
+    }
+    return inputs;
+}
+
+std::string render_embedded_template(const common_chat_templates* templates, std::span<const ChatMessage> messages) {
+    auto inputs = template_inputs(messages, false);
     const auto rendered = common_chat_templates_apply(templates, inputs).prompt.str();
     if (rendered.empty()) {
         throw std::invalid_argument("GGUF chat template rendered an empty prompt");
@@ -42,6 +130,11 @@ std::string render_embedded_template(const common_chat_templates* templates, std
         throw std::invalid_argument("Formatted prompt exceeds the 1 MiB safety limit");
     }
     return rendered;
+}
+
+std::string render_embedded_template(const common_chat_templates* templates, std::string_view user_prompt) {
+    const std::array<ChatMessage, 1> messages{{{ChatRole::user, std::string(user_prompt)}}};
+    return render_embedded_template(templates, messages);
 }
 
 std::string required_model_metadata(const llama_model* model, const char* key) {
@@ -61,11 +154,21 @@ PromptFormatter inspect_prompt_formatter(const llama_model* model) {
         llama_model_n_params(model),
         llama_model_has_encoder(model),
         llama_model_has_decoder(model),
-        raw_template != nullptr && raw_template[0] != '\0'
+        raw_template != nullptr && raw_template[0] != '\0',
+        static_cast<std::uint32_t>(std::max(0, llama_model_n_ctx_train(model)))
     };
     PromptFormatter result;
     result.mode = select_model_prompt_mode(metadata);
-    result.continuous_batching_verified = supports_verified_continuous_batching(metadata);
+    result.continuous_batching_verified = has_verified_continuous_batching(metadata);
+    result.capabilities.architecture = metadata.architecture;
+    result.capabilities.parameter_count = metadata.parameters;
+    result.capabilities.trained_context_tokens = metadata.trained_context_tokens;
+    result.capabilities.has_encoder = metadata.has_encoder;
+    result.capabilities.has_decoder = metadata.has_decoder;
+    result.capabilities.has_embedded_chat_template = metadata.has_chat_template;
+    result.capabilities.continuous_mode = has_verified_continuous_batching(metadata)
+        ? CapabilitySupport::verified
+        : (qualifies_for_continuous_batching(metadata) ? CapabilitySupport::detected : CapabilitySupport::unavailable);
     if (result.mode == ModelPromptMode::embedded_template) {
         if (std::strlen(raw_template) > max_formatted_prompt_bytes) {
             throw std::invalid_argument("GGUF chat template exceeds the 1 MiB safety limit");
@@ -73,16 +176,185 @@ PromptFormatter inspect_prompt_formatter(const llama_model* model) {
         result.embedded_templates = common_chat_templates_init(model, "");
         if (!result.embedded_templates) throw std::invalid_argument("Could not initialize the GGUF chat template");
         (void) render_embedded_template(result.embedded_templates.get(), "template compatibility check");
+        result.capabilities.compatibility = CompatibilityLevel::compatible;
+        result.capabilities.template_source = PromptTemplateSource::embedded;
+        result.capabilities.queue_mode = CapabilitySupport::detected;
+
+        auto probe = [&](common_chat_templates_inputs inputs, std::initializer_list<std::string_view> markers) {
+            try {
+                const auto rendered = common_chat_templates_apply(result.embedded_templates.get(), inputs);
+                const auto text = rendered.prompt.str();
+                for (const auto marker : markers) if (text.find(marker) == std::string::npos) return false;
+                return true;
+            } catch (...) {
+                return false;
+            }
+        };
+        common_chat_templates_inputs conversation;
+        conversation.enable_thinking = false;
+        conversation.messages = {{.role = "system", .content = "pilot_system_probe"},
+                                 {.role = "user", .content = "pilot_user_probe_one"},
+                                 {.role = "assistant", .content = "pilot_assistant_probe"},
+                                 {.role = "user", .content = "pilot_user_probe_two"}};
+        const bool conversation_supported = probe(conversation,
+            {"pilot_system_probe", "pilot_user_probe_one", "pilot_assistant_probe", "pilot_user_probe_two"});
+        result.capabilities.system_messages = conversation_supported
+            ? CapabilitySupport::detected : CapabilitySupport::unavailable;
+        result.capabilities.multi_turn = conversation_supported
+            ? CapabilitySupport::detected : CapabilitySupport::unavailable;
+
+        common_chat_templates_inputs thinking;
+        thinking.enable_thinking = true;
+        thinking.messages = {{.role = "user", .content = "pilot_thinking_probe"}};
+        try {
+            const auto rendered = common_chat_templates_apply(result.embedded_templates.get(), thinking);
+            result.capabilities.thinking = rendered.supports_thinking
+                ? CapabilitySupport::detected : CapabilitySupport::unavailable;
+        } catch (...) {
+            result.capabilities.thinking = CapabilitySupport::unavailable;
+        }
+
+        common_chat_templates_inputs tools;
+        tools.enable_thinking = false;
+        tools.messages = {{.role = "user", .content = "pilot_tool_probe"}};
+        tools.tools = {{"pilot_probe_tool", "Capability probe", R"({"type":"object","properties":{}})"}};
+        result.capabilities.tools = probe(tools, {"pilot_probe_tool"})
+            ? CapabilitySupport::detected : CapabilitySupport::unavailable;
+    } else {
+        result.capabilities.compatibility = CompatibilityLevel::verified;
+        result.capabilities.template_source = PromptTemplateSource::verified_fallback;
+        result.capabilities.queue_mode = CapabilitySupport::verified;
+        result.capabilities.system_messages = CapabilitySupport::unavailable;
+        result.capabilities.multi_turn = CapabilitySupport::unavailable;
+        result.capabilities.thinking = CapabilitySupport::unavailable;
+        result.capabilities.tools = CapabilitySupport::unavailable;
     }
     return result;
 }
 
-std::string format_model_prompt(const PromptFormatter& formatter, std::string_view user_prompt) {
-    validate_user_prompt(user_prompt);
-    if (formatter.mode == ModelPromptMode::verified_nemotron_fallback) {
-        return format_nemotron_prompt(user_prompt);
+std::string format_model_prompt(const PromptFormatter& formatter, const GenerationRequest& request) {
+    std::vector<ChatMessage> single;
+    auto messages = std::span<const ChatMessage>(request.messages);
+    if (messages.empty()) {
+        validate_user_prompt(request.prompt);
+        single.push_back({ChatRole::user, request.prompt});
+        messages = std::span<const ChatMessage>(single);
+    } else {
+        if (!request.prompt.empty()) throw std::invalid_argument("Use prompt or messages, not both");
+        validate_chat_messages(messages);
     }
-    return render_embedded_template(formatter.embedded_templates.get(), user_prompt);
+    if (formatter.mode == ModelPromptMode::verified_nemotron_fallback) {
+        if (messages.size() != 1 || messages.front().role != ChatRole::user) {
+            throw std::invalid_argument("This verified fallback supports one user message only");
+        }
+        return format_nemotron_prompt(messages.front().content);
+    }
+    const bool has_system = std::any_of(messages.begin(), messages.end(),
+        [](const auto& message) { return message.role == ChatRole::system; });
+    if (has_system && formatter.capabilities.system_messages == CapabilitySupport::unavailable) {
+        throw std::invalid_argument("Loaded template does not support system messages");
+    }
+    if (messages.size() > (has_system ? 2U : 1U) &&
+        formatter.capabilities.multi_turn == CapabilitySupport::unavailable) {
+        throw std::invalid_argument("Loaded template does not support multi-turn chat");
+    }
+    return render_embedded_template(formatter.embedded_templates.get(), messages);
+}
+
+PreparedPrompt prepare_model_prompt(const PromptFormatter& formatter, const GenerationRequest& request,
+                                    const llama_vocab* vocab) {
+    PreparedPrompt result;
+    if (request.enable_thinking && formatter.capabilities.thinking == CapabilitySupport::unavailable) {
+        throw std::invalid_argument("Loaded model template does not support thinking output");
+    }
+    if (!request.tools.empty() && formatter.capabilities.tools == CapabilitySupport::unavailable) {
+        throw std::invalid_argument("Loaded model template does not support tools");
+    }
+    if (request.response_format != ResponseFormat::text && formatter.mode != ModelPromptMode::embedded_template)
+        throw std::invalid_argument("Structured output requires an embedded template");
+    if (request.tools.empty() && request.tool_choice != ToolChoice::none) {
+        throw std::invalid_argument("Invalid tools and tool choice combination");
+    }
+    if (formatter.mode == ModelPromptMode::verified_nemotron_fallback) {
+        result.prompt = format_model_prompt(formatter, request);
+        return result;
+    }
+    std::vector<ChatMessage> single;
+    auto messages = std::span<const ChatMessage>(request.messages);
+    if (messages.empty()) {
+        validate_user_prompt(request.prompt);
+        single.push_back({ChatRole::user, request.prompt});
+        messages = single;
+    } else {
+        if (!request.prompt.empty()) throw std::invalid_argument("Use prompt or messages, not both");
+        validate_chat_messages(messages);
+    }
+    // Reuse the same capability checks as ordinary formatting before constructing
+    // llama.cpp's incremental semantic parser.
+    (void) format_model_prompt(formatter, request);
+    auto inputs = template_inputs(messages, request.enable_thinking, request.tools, request.tool_choice);
+    if (request.response_format != ResponseFormat::text) inputs.json_schema = request.response_schema_json;
+    result.session = std::make_unique<common_chat_session>(formatter.embedded_templates.get(), vocab, inputs);
+    result.prompt = result.session->prompt().str();
+    if (result.prompt.empty()) throw std::invalid_argument("GGUF chat template rendered an empty prompt");
+    if (result.prompt.size() > max_formatted_prompt_bytes) {
+        throw std::invalid_argument("Formatted prompt exceeds the 1 MiB safety limit");
+    }
+    result.parsed = result.session->msg();
+    result.tools = request.tools;
+    return result;
+}
+
+std::vector<ParsedPiece> parsed_deltas(PreparedPrompt& prepared, const common_chat_msg& current, bool final = false) {
+    std::vector<ParsedPiece> result;
+    if (current.tool_calls.size() > 16) throw std::length_error("Too many parsed tool calls");
+    std::size_t tool_bytes = 0;
+    for (const auto& call : current.tool_calls) {
+        if (call.id.size() > 128 || call.name.size() > 64 || call.arguments.size() > 65536 ||
+            tool_bytes > 262144 - call.arguments.size()) throw std::length_error("Parsed tool call exceeds bounds");
+        tool_bytes += call.arguments.size();
+        const auto name_match = std::find_if(prepared.tools.begin(), prepared.tools.end(), [&](const auto& tool) {
+            return final ? tool.name == call.name : tool.name.starts_with(call.name);
+        });
+        if (call.name.empty() ? final : name_match == prepared.tools.end())
+            throw std::invalid_argument("Model emitted an unknown tool name");
+        if (final) {
+            const auto arguments = common_json::parse(call.arguments);
+            if (!arguments.is_object()) throw std::invalid_argument("Tool arguments must be a JSON object");
+        }
+    }
+    for (const auto& diff : common_chat_msg_diff::compute_diffs(prepared.parsed, current)) {
+        if (diff.tool_call_index != std::string::npos) {
+            if (diff.tool_call_index > std::numeric_limits<std::uint32_t>::max())
+                throw std::length_error("Tool call index overflow");
+            result.push_back({diff.tool_call_delta.arguments, OutputChannel::tool_call,
+                static_cast<std::uint32_t>(diff.tool_call_index), diff.tool_call_delta.id, diff.tool_call_delta.name});
+        }
+        if (!diff.reasoning_content_delta.empty()) {
+            result.push_back({diff.reasoning_content_delta, OutputChannel::reasoning});
+        }
+        if (!diff.content_delta.empty()) result.push_back({diff.content_delta, OutputChannel::content});
+    }
+    prepared.parsed = current;
+    for (const auto& piece : result) {
+        if (piece.bytes.size() > max_formatted_prompt_bytes - prepared.output_bytes) {
+            throw std::length_error("Parsed model output exceeds the 1 MiB safety limit");
+        }
+        prepared.output_bytes += piece.bytes.size();
+    }
+    return result;
+}
+
+std::vector<ParsedPiece> feed_parser(PreparedPrompt& prepared, std::string piece, llama_token token) {
+    if (!prepared.session) return {{std::move(piece), OutputChannel::content}};
+    common_chat_input input;
+    input.append(piece, token);
+    return parsed_deltas(prepared, prepared.session->feed(input));
+}
+
+std::vector<ParsedPiece> finish_parser(PreparedPrompt& prepared) {
+    if (!prepared.session) return {};
+    return parsed_deltas(prepared, prepared.session->finish(), true);
 }
 
 struct BackendSession {
@@ -92,6 +364,38 @@ struct BackendSession {
 
 template <typename T, void (*Free)(T*)>
 using Owned = std::unique_ptr<T, decltype(Free)>;
+
+Owned<llama_sampler, llama_sampler_free> make_sampler(const GenerationRequest& request, const llama_vocab* vocab,
+                                                       std::string_view grammar = {}) {
+    if (request.temperature == 0.0F) {
+        if (grammar.empty()) return {llama_sampler_init_greedy(), llama_sampler_free};
+    }
+    auto* chain = llama_sampler_chain_init(llama_sampler_chain_default_params());
+    if (!chain) return {nullptr, llama_sampler_free};
+    if (!grammar.empty()) llama_sampler_chain_add(chain, llama_sampler_init_grammar(vocab, std::string(grammar).c_str(), "root"));
+    if (request.temperature == 0.0F) {
+        llama_sampler_chain_add(chain, llama_sampler_init_greedy());
+    } else {
+        llama_sampler_chain_add(chain, llama_sampler_init_top_k(request.top_k));
+        llama_sampler_chain_add(chain, llama_sampler_init_top_p(request.top_p, 1));
+        llama_sampler_chain_add(chain, llama_sampler_init_temp(request.temperature));
+        llama_sampler_chain_add(chain, llama_sampler_init_dist(request.seed.value_or(LLAMA_DEFAULT_SEED)));
+    }
+    return {chain, llama_sampler_free};
+}
+
+std::string token_piece(const llama_vocab* vocab, llama_token token) {
+    std::array<char, 256> buffer{};
+    const auto bytes = llama_token_to_piece(vocab, token, buffer.data(), buffer.size(), 0, false);
+    if (bytes == std::numeric_limits<int32_t>::min()) throw std::runtime_error("Token piece length overflow");
+    if (bytes < 0) {
+        std::string piece(static_cast<std::size_t>(-bytes), '\0');
+        if (llama_token_to_piece(vocab, token, piece.data(), -bytes, 0, false) != -bytes)
+            throw std::runtime_error("Token conversion failed");
+        return piece;
+    }
+    return std::string(buffer.data(), static_cast<std::size_t>(bytes));
+}
 
 struct ClearState {
     llama_context* context;
@@ -114,6 +418,11 @@ public:
             throw std::runtime_error("llama.cpp could not load the local GGUF");
         }
         prompt_formatter_ = inspect_prompt_formatter(model_.get());
+        if (config.context_tokens > prompt_formatter_.capabilities.trained_context_tokens) {
+            throw std::invalid_argument("Configured context exceeds the model's declared trained context");
+        }
+        prompt_formatter_.capabilities.configured_context_tokens = config.context_tokens;
+        prompt_formatter_.capabilities.configured_max_output_tokens = config.max_output_tokens;
         auto params = llama_context_default_params();
         params.n_ctx = config.context_tokens;
         params.n_batch = config.batch_tokens;
@@ -139,15 +448,20 @@ public:
         return result;
     }
 
+    std::optional<ModelCapabilities> model_capabilities() const override {
+        return prompt_formatter_.capabilities;
+    }
+
     void generate(const GenerationRequest& request, const DecodeStarted& decode_started,
                   const TokenCallback& emit_token, const Checkpoint& checkpoint) override {
         record_process_memory(MemorySamplePoint::request_start);
         checkpoint();
-        if (request.max_output_tokens == 0 || request.max_output_tokens > 512) {
-            throw std::invalid_argument("Use 1-512 output tokens");
+        if (request.max_output_tokens == 0 || request.max_output_tokens > config_.max_output_tokens) {
+            throw std::invalid_argument("Requested output exceeds the configured runtime budget");
         }
-        const auto prompt = format_model_prompt(prompt_formatter_, request.prompt);
         const auto* vocab = llama_model_get_vocab(model_.get());
+        auto prepared = prepare_model_prompt(prompt_formatter_, request, vocab);
+        const auto& prompt = prepared.prompt;
         const auto needed = llama_tokenize(vocab, prompt.data(), static_cast<int32_t>(prompt.size()),
                                            nullptr, 0, true, true);
         if (needed >= 0 || needed == std::numeric_limits<int32_t>::min()) {
@@ -163,7 +477,8 @@ public:
             throw std::runtime_error("Prompt tokenization failed");
         }
         ClearState reset{context_.get(), [this](MemorySamplePoint point) { record_process_memory(point); }};
-        Owned<llama_sampler, llama_sampler_free> sampler(llama_sampler_init_greedy(), llama_sampler_free);
+		const auto grammar = prepared.session && (request.response_format != ResponseFormat::text || request.tool_choice == ToolChoice::required) ? prepared.session->grammar() : std::string_view{};
+		auto sampler = make_sampler(request, vocab, grammar);
         Owned<llama_batch_ext, llama_batch_ext_free> batch(llama_batch_ext_init(context_.get()), llama_batch_ext_free);
         if (!sampler || !batch) {
             throw std::runtime_error("Could not allocate sampler or batch");
@@ -195,31 +510,41 @@ public:
         llama_synchronize(context_.get());
         record_process_memory(MemorySamplePoint::prefill_complete);
         decode_started();
+        StopFilter stop_filter(request.stop);
+        bool stopped = false;
         for (std::uint32_t generated = 0; generated < request.max_output_tokens; ++generated) {
             checkpoint();
             const auto token = llama_sampler_sample(sampler.get(), context_.get(), -1);
             if (llama_vocab_is_eog(vocab, token)) {
                 break;
             }
-            std::array<char, 256> buffer{};
-            const auto bytes = llama_token_to_piece(vocab, token, buffer.data(), buffer.size(), 0, false);
-            if (bytes < 0) {
-                if (bytes == std::numeric_limits<int32_t>::min()) {
-                    throw std::runtime_error("Token piece length overflow");
-                }
-                std::string piece(static_cast<std::size_t>(-bytes), '\0');
-                if (llama_token_to_piece(vocab, token, piece.data(), -bytes, 0, false) != -bytes) {
-                    throw std::runtime_error("Token conversion failed");
-                }
-                emit_token(piece);
-            } else {
-                emit_token(std::string_view(buffer.data(), static_cast<std::size_t>(bytes)));
+            emit_token({std::string{}, OutputChannel::content, true});
+            for (auto& output : feed_parser(prepared, token_piece(vocab, token), token)) {
+                if (output.channel == OutputChannel::tool_call) {
+                    for (auto& filtered : stop_filter.finish()) emit_token({filtered.bytes, filtered.channel, false});
+                    emit_token({output.bytes, output.channel, false, output.tool_call_index, output.tool_call_id, output.tool_name});
+                } else for (auto& filtered : stop_filter.push(std::move(output), stopped))
+                    emit_token({filtered.bytes, filtered.channel, false});
+                if (stopped) break;
             }
+            if (stopped) break;
             if (generated + 1 < request.max_output_tokens) {
                 llama_batch_ext_clear(batch.get());
                 add(token, static_cast<llama_pos>(count + generated), true);
                 evaluate();
             }
+        }
+        if (!stopped) {
+            for (auto& output : finish_parser(prepared)) {
+                if (output.channel == OutputChannel::tool_call) {
+                    for (auto& filtered : stop_filter.finish()) emit_token({filtered.bytes, filtered.channel, false});
+                    emit_token({output.bytes, output.channel, false, output.tool_call_index, output.tool_call_id, output.tool_name});
+                } else for (auto& filtered : stop_filter.push(std::move(output), stopped))
+                    emit_token({filtered.bytes, filtered.channel, false});
+                if (stopped) break;
+            }
+            if (!stopped) for (auto& output : stop_filter.finish())
+                emit_token({output.bytes, output.channel, false});
         }
     }
 
@@ -283,8 +608,18 @@ public:
         model_.reset(llama_model_load_from_file(config.path.c_str(), model_params));
         if (!model_) throw std::runtime_error("llama.cpp could not load the local GGUF");
         prompt_formatter_ = inspect_prompt_formatter(model_.get());
-        if (!prompt_formatter_.continuous_batching_verified) {
-            throw std::invalid_argument("Continuous batching is not verified for this model");
+        if (config.context_tokens > prompt_formatter_.capabilities.trained_context_tokens) {
+            throw std::invalid_argument("Configured context exceeds the model's declared trained context");
+        }
+        prompt_formatter_.capabilities.configured_context_tokens = config.context_tokens;
+        prompt_formatter_.capabilities.configured_max_output_tokens = config.max_output_tokens;
+        if (!prompt_formatter_.continuous_batching_verified &&
+            !(config.allow_unqualified_continuous &&
+              qualifies_for_continuous_batching({prompt_formatter_.capabilities.architecture,
+                  prompt_formatter_.capabilities.parameter_count, prompt_formatter_.capabilities.has_encoder,
+                  prompt_formatter_.capabilities.has_decoder, prompt_formatter_.capabilities.has_embedded_chat_template,
+                  prompt_formatter_.capabilities.trained_context_tokens}))) {
+            throw std::invalid_argument("Continuous batching is not qualified for this model");
         }
         auto params = llama_context_default_params();
         params.n_ctx = config.context_tokens;
@@ -309,14 +644,19 @@ public:
         return result;
     }
 
+    std::optional<ModelCapabilities> model_capabilities() const override {
+        return prompt_formatter_.capabilities;
+    }
+
     std::size_t admit(SequenceId sequence, const GenerationRequest& request) override {
         if (sequence >= 2 || states_.contains(sequence) || request.max_output_tokens == 0 ||
-            request.max_output_tokens > 512) {
+            request.max_output_tokens > config_.max_output_tokens) {
             throw std::invalid_argument("Invalid batch sequence or output bound");
         }
         record_process_memory(MemorySamplePoint::request_start);
-        const auto prompt = format_model_prompt(prompt_formatter_, request.prompt);
         const auto* vocab = llama_model_get_vocab(model_.get());
+        auto prepared = prepare_model_prompt(prompt_formatter_, request, vocab);
+        const auto& prompt = prepared.prompt;
         const auto needed = llama_tokenize(vocab, prompt.data(), static_cast<int32_t>(prompt.size()),
                                            nullptr, 0, true, true);
         if (needed >= 0 || needed == std::numeric_limits<int32_t>::min()) {
@@ -329,7 +669,10 @@ public:
                            static_cast<int32_t>(state.tokens.size()), true, true) != static_cast<int32_t>(state.tokens.size())) {
             throw std::runtime_error("Prompt tokenization failed");
         }
-        state.sampler.reset(llama_sampler_init_greedy());
+		state.prepared = std::move(prepared);
+		const auto grammar = state.prepared.session && (request.response_format != ResponseFormat::text || request.tool_choice == ToolChoice::required) ? state.prepared.session->grammar() : std::string_view{};
+		state.sampler = make_sampler(request, vocab, grammar);
+        state.stop_filter = StopFilter(request.stop);
         if (!state.sampler) throw std::runtime_error("Could not allocate sequence sampler");
         const auto count = state.tokens.size();
         states_.emplace(sequence, std::move(state));
@@ -390,7 +733,16 @@ public:
         const auto* vocab = llama_model_get_vocab(model_.get());
         for (const auto& turn : turns) {
             auto& state = states_.at(turn.sequence);
-            BatchStepEvent event{turn.sequence, false, std::nullopt, false, {}};
+            BatchStepEvent event{turn.sequence, false, false, {}, false, {}};
+            auto append_output = [&](ParsedPiece output) {
+                if (output.channel == OutputChannel::tool_call) {
+                    for (auto& filtered : state.stop_filter.finish())
+                        event.output_pieces.push_back({std::move(filtered.bytes), filtered.channel});
+                    event.output_pieces.push_back({std::move(output.bytes), output.channel, output.tool_call_index,
+                        std::move(output.tool_call_id), std::move(output.tool_name)});
+                } else for (auto& filtered : state.stop_filter.push(std::move(output), state.stopped))
+                    event.output_pieces.push_back({std::move(filtered.bytes), filtered.channel});
+            };
             if (turn.logits < 0) {
                 events.push_back(std::move(event));
                 continue;
@@ -401,13 +753,33 @@ public:
             }
             const auto token = llama_sampler_sample(state.sampler.get(), context_.get(), turn.logits);
             if (llama_vocab_is_eog(vocab, token)) {
+                for (auto& output : finish_parser(state.prepared)) {
+                    append_output(std::move(output));
+                    if (state.stopped) break;
+                }
+                if (!state.stopped) for (auto& output : state.stop_filter.finish())
+                    event.output_pieces.push_back({std::move(output.bytes), output.channel});
                 event.finished = true;
                 events.push_back(std::move(event));
                 continue;
             }
-            event.token_piece = token_piece(vocab, token);
+            event.generated_token = true;
+            for (auto& output : feed_parser(state.prepared, token_piece(vocab, token), token)) {
+                append_output(std::move(output));
+                if (state.stopped) break;
+            }
             ++state.generated;
-            if (state.generated >= state.max_output_tokens) event.finished = true;
+            if (state.stopped) {
+                event.finished = true;
+            } else if (state.generated >= state.max_output_tokens) {
+                for (auto& output : finish_parser(state.prepared)) {
+                    append_output(std::move(output));
+                    if (state.stopped) break;
+                }
+                if (!state.stopped) for (auto& output : state.stop_filter.finish())
+                    event.output_pieces.push_back({std::move(output.bytes), output.channel});
+                event.finished = true;
+            }
             else state.pending_token = token;
             events.push_back(std::move(event));
         }
@@ -434,6 +806,9 @@ private:
         std::uint32_t max_output_tokens = 0;
         std::optional<llama_token> pending_token;
         Owned<llama_sampler, llama_sampler_free> sampler{nullptr, llama_sampler_free};
+        PreparedPrompt prepared;
+        StopFilter stop_filter;
+        bool stopped = false;
     };
 
     int32_t add_token(SequenceId sequence, llama_token token, llama_pos position, bool logits) {
@@ -507,7 +882,8 @@ private:
 
 std::unique_ptr<InferenceBackend> make_llama_backend(const LlamaModelConfig& config) {
     if (!std::filesystem::is_regular_file(config.path) || config.threads < 1 ||
-        config.context_tokens < 32 || config.context_tokens > 4096 ||
+        config.context_tokens < 32 || config.context_tokens > 1048576 ||
+        config.max_output_tokens == 0 || config.max_output_tokens > config.context_tokens ||
         config.batch_tokens == 0 || config.batch_tokens > config.context_tokens || config.gpu_layers < 0) {
         throw std::invalid_argument("Invalid local model path or execution configuration");
     }
@@ -516,7 +892,9 @@ std::unique_ptr<InferenceBackend> make_llama_backend(const LlamaModelConfig& con
 
 std::unique_ptr<BatchExecutor> make_llama_batch_executor(const LlamaModelConfig& config) {
     if (!std::filesystem::is_regular_file(config.path) || config.threads < 1 ||
-        config.context_tokens != 4096 || config.batch_tokens != 128 || config.gpu_layers < 0) {
+        config.context_tokens < 64 || config.context_tokens > 1048576 ||
+        config.max_output_tokens == 0 || config.max_output_tokens > config.context_tokens / 2 ||
+        config.batch_tokens != 128 || config.gpu_layers < 0) {
         throw std::invalid_argument("Invalid conservative two-sequence model configuration");
     }
     return std::make_unique<LlamaBatchExecutor>(config);

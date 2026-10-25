@@ -22,6 +22,48 @@ message GetStatusResponse {
   SchedulerSnapshot scheduler = 3;
   // Bounded process snapshots plus llama.cpp allocation accounting.
   optional MemorySnapshot memory = 4;
+  // Load-time GGUF metadata and bounded template probes. Detected is not verified.
+  optional ModelCapabilities model_capabilities = 5;
+}
+
+message ModelCapabilities {
+  string architecture = 1;
+  uint64 parameter_count = 2;
+  uint32 trained_context_tokens = 3;
+  bool has_encoder = 4;
+  bool has_decoder = 5;
+  bool has_embedded_chat_template = 6;
+  CompatibilityLevel compatibility = 7;
+  PromptTemplateSource template_source = 8;
+  CapabilitySupport queue_mode = 9;
+  CapabilitySupport continuous_mode = 10;
+  CapabilitySupport system_messages = 11;
+  CapabilitySupport multi_turn = 12;
+  CapabilitySupport thinking = 13;
+  CapabilitySupport tools = 14;
+  // Operator-selected runtime budgets. These may be below the model maximum.
+  uint32 configured_context_tokens = 15;
+  uint32 configured_max_output_tokens = 16;
+}
+
+enum CompatibilityLevel {
+  COMPATIBILITY_LEVEL_UNSPECIFIED = 0;
+  COMPATIBILITY_LEVEL_COMPATIBLE = 1;
+  COMPATIBILITY_LEVEL_VERIFIED = 2;
+}
+
+enum PromptTemplateSource {
+  PROMPT_TEMPLATE_SOURCE_UNSPECIFIED = 0;
+  PROMPT_TEMPLATE_SOURCE_EMBEDDED = 1;
+  PROMPT_TEMPLATE_SOURCE_VERIFIED_FALLBACK = 2;
+}
+
+enum CapabilitySupport {
+  CAPABILITY_SUPPORT_UNSPECIFIED = 0;
+  CAPABILITY_SUPPORT_UNAVAILABLE = 1;
+  CAPABILITY_SUPPORT_DETECTED = 2;
+  CAPABILITY_SUPPORT_VERIFIED = 3;
+  CAPABILITY_SUPPORT_UNQUALIFIED = 4;
 }
 
 message SchedulerSnapshot {
@@ -94,8 +136,63 @@ message GenerateRequest {
   // Nonzero and unique among active requests; public JSON renders it as a string.
   uint64 request_id = 1;
   string prompt = 2;
-  // Explicit 1..512 for the current native adapter; zero is invalid.
+  // Explicit 1..configured_max_output_tokens; zero is invalid.
   uint32 max_output_tokens = 3;
+  // Structured chat input. Public callers use this; prompt remains for bounded
+  // internal compatibility fixtures and exactly one form must be present.
+  repeated ChatMessage messages = 4;
+  // Internal Phase 8D contract. Public exposure waits for native parser integration.
+  bool enable_thinking = 5;
+  float temperature = 6;
+  float top_p = 7;
+  int32 top_k = 8;
+  optional uint32 seed = 9;
+  repeated string stop = 10;
+  repeated ToolDefinition tools = 11;
+  ToolChoice tool_choice = 12;
+  ResponseFormat response_format = 13;
+  string response_schema_json = 14;
+}
+
+message ToolDefinition {
+  string name = 1;
+  string description = 2;
+  string parameters_json = 3;
+}
+
+enum ToolChoice {
+  TOOL_CHOICE_UNSPECIFIED = 0;
+  TOOL_CHOICE_NONE = 1;
+  TOOL_CHOICE_AUTO = 2;
+  TOOL_CHOICE_REQUIRED = 3;
+}
+
+message ChatMessage {
+  ChatRole role = 1;
+  string content = 2;
+  repeated ToolCall tool_calls = 3;
+  string tool_call_id = 4;
+}
+
+message ToolCall {
+  string id = 1;
+  string name = 2;
+  string arguments_json = 3;
+}
+
+enum ChatRole {
+  CHAT_ROLE_UNSPECIFIED = 0;
+  CHAT_ROLE_SYSTEM = 1;
+  CHAT_ROLE_USER = 2;
+  CHAT_ROLE_ASSISTANT = 3;
+  CHAT_ROLE_TOOL = 4;
+}
+
+enum ResponseFormat {
+  RESPONSE_FORMAT_UNSPECIFIED = 0;
+  RESPONSE_FORMAT_TEXT = 1;
+  RESPONSE_FORMAT_JSON_OBJECT = 2;
+  RESPONSE_FORMAT_JSON_SCHEMA = 3;
 }
 
 message GenerateEvent {
@@ -112,10 +209,26 @@ message GenerateEvent {
 message Accepted {}
 
 message Token {
-  // One raw native non-EOG piece. May be empty or split a UTF-8 code point.
+  // Parsed output bytes. May be empty or split a UTF-8 code point.
   bytes piece = 1;
-  // Starts at 1, increases by exactly 1 per native token event, including empties.
+  // Cumulative native non-EOG token count. A parser flush may leave it unchanged.
   uint32 output_tokens = 2;
+  // Every event is explicitly classified; UNSPECIFIED is invalid on the wire.
+  TokenChannel channel = 3;
+  // True exactly once for each generated native non-EOG token. False events carry
+  // parser-buffered semantic output and must not change output_tokens.
+  bool advances_output_tokens = 4;
+  // Present only for TOOL_CALL. piece contains the incremental arguments bytes.
+  optional uint32 tool_call_index = 5;
+  string tool_call_id = 6;
+  string tool_name = 7;
+}
+
+enum TokenChannel {
+  TOKEN_CHANNEL_UNSPECIFIED = 0;
+  TOKEN_CHANNEL_CONTENT = 1;
+  TOKEN_CHANNEL_REASONING = 2;
+  TOKEN_CHANNEL_TOOL_CALL = 3;
 }
 
 message Finished {

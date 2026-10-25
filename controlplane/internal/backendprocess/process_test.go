@@ -129,6 +129,9 @@ func TestInvalidConfigNeverStarts(t *testing.T) {
 		func(c *Config) { c.ShutdownTimeout = 2 * time.Minute },
 		func(c *Config) { c.StateDir = "" },
 		func(c *Config) { c.Batching = "unbounded" },
+		func(c *Config) { c.ContextTokens, c.MaxOutputTokens = 31, 1 },
+		func(c *Config) { c.ContextTokens, c.MaxOutputTokens = 4096, 4097 },
+		func(c *Config) { c.Batching, c.ContextTokens, c.MaxOutputTokens = "continuous", 4096, 2049 },
 	} {
 		c := config(t)
 		mutate(&c)

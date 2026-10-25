@@ -32,7 +32,7 @@ func TestMetricPresence(t *testing.T) {
 
 func TestRawTokenAndID(t *testing.T) {
 	for _, piece := range [][]byte{nil, {0xf0, 0x9f, 0}} {
-		source := &pb.GenerateEvent{RequestId: math.MaxUint64, Payload: &pb.GenerateEvent_Token{Token: &pb.Token{Piece: piece, OutputTokens: 1}}}
+		source := &pb.GenerateEvent{RequestId: math.MaxUint64, Payload: &pb.GenerateEvent_Token{Token: &pb.Token{Piece: piece, OutputTokens: 1, Channel: pb.TokenChannel_TOKEN_CHANNEL_REASONING, AdvancesOutputTokens: true}}}
 		data, err := proto.Marshal(source)
 		if err != nil {
 			t.Fatal(err)
@@ -41,9 +41,27 @@ func TestRawTokenAndID(t *testing.T) {
 		if err := proto.Unmarshal(data, &result); err != nil {
 			t.Fatal(err)
 		}
-		if result.RequestId != math.MaxUint64 || result.GetToken() == nil || !bytes.Equal(result.GetToken().Piece, piece) || result.GetToken().OutputTokens != 1 {
+		if result.RequestId != math.MaxUint64 || result.GetToken() == nil || !bytes.Equal(result.GetToken().Piece, piece) || result.GetToken().OutputTokens != 1 || result.GetToken().Channel != pb.TokenChannel_TOKEN_CHANNEL_REASONING {
 			t.Fatal("ID, token presence or raw bytes lost")
 		}
+	}
+}
+
+func TestStructuredChatRoundTrip(t *testing.T) {
+	source := &pb.GenerateRequest{RequestId: 9, MaxOutputTokens: 32, EnableThinking: true, Messages: []*pb.ChatMessage{
+		{Role: pb.ChatRole_CHAT_ROLE_SYSTEM, Content: "brief"},
+		{Role: pb.ChatRole_CHAT_ROLE_USER, Content: "hello"},
+	}}
+	data, err := proto.Marshal(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result pb.GenerateRequest
+	if err := proto.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Prompt != "" || !result.EnableThinking || len(result.Messages) != 2 || result.Messages[0].Role != pb.ChatRole_CHAT_ROLE_SYSTEM || result.Messages[1].Content != "hello" {
+		t.Fatal(&result)
 	}
 }
 
@@ -63,6 +81,33 @@ func TestMemoryPresence(t *testing.T) {
 	}
 	if result.Memory == nil || len(result.Memory.ProcessSamples) != 1 || result.Memory.ProcessSamples[0].ResidentBytes == nil || result.Memory.ProcessSamples[0].GetResidentBytes() != 0 || result.Memory.ModelTensorBytes != nil || len(result.Memory.LlamaBuffers) != 1 {
 		t.Fatal("memory presence or rows lost")
+	}
+}
+
+func TestModelCapabilitiesRoundTrip(t *testing.T) {
+	source := &pb.GetStatusResponse{ModelCapabilities: &pb.ModelCapabilities{
+		Architecture: "gemma4", ParameterCount: 8_000_000_000, TrainedContextTokens: 131_072,
+		ConfiguredContextTokens: 8192, ConfiguredMaxOutputTokens: 1024,
+		HasDecoder: true, HasEmbeddedChatTemplate: true,
+		Compatibility:  pb.CompatibilityLevel_COMPATIBILITY_LEVEL_COMPATIBLE,
+		TemplateSource: pb.PromptTemplateSource_PROMPT_TEMPLATE_SOURCE_EMBEDDED,
+		QueueMode:      pb.CapabilitySupport_CAPABILITY_SUPPORT_DETECTED,
+		ContinuousMode: pb.CapabilitySupport_CAPABILITY_SUPPORT_UNQUALIFIED,
+	}}
+	data, err := proto.Marshal(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result pb.GetStatusResponse
+	if err := proto.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.ModelCapabilities == nil || result.ModelCapabilities.Architecture != "gemma4" ||
+		result.ModelCapabilities.ParameterCount != 8_000_000_000 ||
+		result.ModelCapabilities.ConfiguredContextTokens != 8192 ||
+		result.ModelCapabilities.ConfiguredMaxOutputTokens != 1024 ||
+		result.ModelCapabilities.ContinuousMode != pb.CapabilitySupport_CAPABILITY_SUPPORT_UNQUALIFIED {
+		t.Fatal("model capabilities lost on wire")
 	}
 }
 

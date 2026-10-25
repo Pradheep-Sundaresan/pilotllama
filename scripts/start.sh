@@ -12,6 +12,8 @@ studio="$root/studio/dist"
 model=${PILOTLLAMA_MODEL:-}
 model_id=${PILOTLLAMA_MODEL_ID:-}
 batching=${PILOTLLAMA_BATCHING:-}
+context_tokens=${PILOTLLAMA_CONTEXT_TOKENS:-}
+max_output_tokens=${PILOTLLAMA_MAX_OUTPUT_TOKENS:-}
 listen=${PILOTLLAMA_LISTEN:-127.0.0.1:8080}
 rate=${PILOTLLAMA_RATE_PER_MINUTE:-60}
 burst=${PILOTLLAMA_RATE_BURST:-4}
@@ -19,6 +21,7 @@ burst=${PILOTLLAMA_RATE_BURST:-4}
 usage() {
     echo "Usage: ./scripts/start.sh [--model ABSOLUTE_GGUF] [--model-id ID]" >&2
     echo "                          [--batching queue|continuous] [--listen 127.0.0.1:PORT]" >&2
+    echo "                          [--context-tokens N] [--max-output-tokens N]" >&2
 }
 
 while [ "$#" -gt 0 ]; do
@@ -28,6 +31,8 @@ while [ "$#" -gt 0 ]; do
         --model-id) model_id=$2 ;;
         --batching) batching=$2 ;;
         --listen) listen=$2 ;;
+        --context-tokens) context_tokens=$2 ;;
+        --max-output-tokens) max_output_tokens=$2 ;;
         *) usage; exit 2 ;;
     esac
     shift 2
@@ -61,8 +66,12 @@ fi
 if [ -z "$model" ] && [ -f "$state/model.path" ]; then model=$(cat "$state/model.path"); fi
 if [ -z "$model_id" ] && [ -f "$state/model.id" ]; then model_id=$(cat "$state/model.id"); fi
 if [ -z "$batching" ] && [ -f "$state/batching" ]; then batching=$(cat "$state/batching"); fi
+if [ -z "$context_tokens" ] && [ -f "$state/context.tokens" ]; then context_tokens=$(cat "$state/context.tokens"); fi
+if [ -z "$max_output_tokens" ] && [ -f "$state/max-output.tokens" ]; then max_output_tokens=$(cat "$state/max-output.tokens"); fi
 [ -n "$model_id" ] || model_id=local-model
 [ -n "$batching" ] || batching=queue
+[ -n "$context_tokens" ] || context_tokens=4096
+[ -n "$max_output_tokens" ] || max_output_tokens=512
 
 case "$model" in
     /*) ;;
@@ -80,6 +89,14 @@ case "$model_id" in
 esac
 [ "${#model_id}" -le 128 ] || { echo "Model ID exceeds 128 characters" >&2; exit 2; }
 case "$batching" in queue|continuous) ;; *) echo "Batching must be queue or continuous" >&2; exit 2 ;; esac
+case "$context_tokens" in ''|*[!0-9]*) echo "Context tokens must be an integer" >&2; exit 2 ;; esac
+case "$max_output_tokens" in ''|*[!0-9]*) echo "Maximum output tokens must be an integer" >&2; exit 2 ;; esac
+[ "$context_tokens" -ge 32 ] && [ "$context_tokens" -le 1048576 ] || { echo "Context tokens must be 32..1048576" >&2; exit 2; }
+[ "$max_output_tokens" -ge 1 ] && [ "$max_output_tokens" -le "$context_tokens" ] || { echo "Maximum output tokens must fit inside the context" >&2; exit 2; }
+if [ "$batching" = continuous ]; then
+    half_context=$((context_tokens / 2))
+    [ "$max_output_tokens" -le "$half_context" ] || { echo "Continuous mode output must fit each half of the shared context" >&2; exit 2; }
+fi
 case "$listen" in
     127.0.0.1:*) port=${listen#127.0.0.1:} ;;
     *) echo "Listen address must be an explicit IPv4 loopback address: 127.0.0.1:PORT" >&2; exit 2 ;;
@@ -110,7 +127,7 @@ token=$(cat "$token_file")
 [ "${#token}" -ge 32 ] && [ "${#token}" -le 256 ] || { echo "Stored auth token is invalid" >&2; exit 1; }
 chmod 600 "$token_file"
 
-for item in "model.path:$model" "model.id:$model_id" "batching:$batching" "listen:$listen"; do
+for item in "model.path:$model" "model.id:$model_id" "batching:$batching" "context.tokens:$context_tokens" "max-output.tokens:$max_output_tokens" "listen:$listen"; do
     name=${item%%:*}
     value=${item#*:}
     temporary=$(mktemp "$state/$name.XXXXXX")
@@ -129,11 +146,22 @@ set -- "$api" \
     --model "$model" \
     --model-id "$model_id" \
     --backend-batching "$batching" \
+    --context-tokens "$context_tokens" \
+    --max-output-tokens "$max_output_tokens" \
     --studio-dir "$studio" \
     --model-config-dir "$state" \
     --auth-token-env INFERNO_AUTH_TOKEN \
     --rate-per-minute "$rate" \
     --rate-burst "$burst"
+qualification="$state/continuous-qualified"
+if [ "$batching" = continuous ] && [ -f "$qualification" ] && [ ! -L "$qualification" ]; then
+    qualified_path=$(sed -n '1p' "$qualification")
+    qualified_fingerprint=$(sed -n '2p' "$qualification")
+    current_fingerprint=$(stat -f '%z:%m' "$model")
+    if [ "$qualified_path" = "$model" ] && [ "$qualified_fingerprint" = "$current_fingerprint" ]; then
+        set -- "$@" --backend-qualify-continuous
+    fi
+fi
 INFERNO_AUTH_TOKEN=$token nohup "$@" > "$log" 2>&1 &
 pid=$!
 temporary=$(mktemp "$state/service.pid.XXXXXX")
@@ -173,5 +201,6 @@ printf 'PilotLlama is ready.\n'
 printf 'API:        http://%s\n' "$listen"
 printf 'Studio:     http://%s/\n' "$listen"
 printf 'Model:      %s (%s)\n' "$model_id" "$batching"
+printf 'Budgets:    %s context / %s maximum output tokens\n' "$context_tokens" "$max_output_tokens"
 printf 'Token file: %s\n' "$token_file"
 printf 'Log:        %s\n' "$log"

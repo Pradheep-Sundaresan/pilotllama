@@ -30,6 +30,11 @@ func (b *authBackend) Generate(_ context.Context, _ *pb.GenerateRequest, consume
 	}
 	return success(1), nil
 }
+func (b *authBackend) GeneratePieces(ctx context.Context, request *pb.GenerateRequest, consume func(rpcbackend.OutputPiece) error) (rpcbackend.Observation, error) {
+	return b.Generate(ctx, request, func(piece []byte) error {
+		return consume(rpcbackend.OutputPiece{Bytes: piece, Channel: pb.TokenChannel_TOKEN_CHANNEL_CONTENT, AdvancesOutputTokens: true})
+	})
+}
 
 type unreadBody struct{ t *testing.T }
 

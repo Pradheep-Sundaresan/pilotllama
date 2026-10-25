@@ -58,7 +58,7 @@ func accepted() *pb.GenerateEvent {
 	return &pb.GenerateEvent{RequestId: 42, Payload: &pb.GenerateEvent_Accepted{Accepted: &pb.Accepted{}}}
 }
 func token(n uint32, piece []byte) *pb.GenerateEvent {
-	return &pb.GenerateEvent{RequestId: 42, Payload: &pb.GenerateEvent_Token{Token: &pb.Token{OutputTokens: n, Piece: piece}}}
+	return &pb.GenerateEvent{RequestId: 42, Payload: &pb.GenerateEvent_Token{Token: &pb.Token{OutputTokens: n, Piece: piece, Channel: pb.TokenChannel_TOKEN_CHANNEL_CONTENT, AdvancesOutputTokens: true}}}
 }
 func finished(n uint32) *pb.GenerateEvent {
 	return &pb.GenerateEvent{RequestId: 42, Payload: &pb.GenerateEvent_Finished{Finished: &pb.Finished{State: pb.TerminalState_TERMINAL_STATE_COMPLETED, Metrics: &pb.RequestMetrics{OutputTokens: n, RuntimeLatencyMs: proto.Float64(1)}}}}
@@ -89,6 +89,7 @@ func TestProtocolValidation(t *testing.T) {
 		{"bad-metric", []*pb.GenerateEvent{accepted(), badMetric}, false},
 		{"missing-payload", []*pb.GenerateEvent{{RequestId: 42}}, false},
 		{"count-mismatch", []*pb.GenerateEvent{accepted(), finished(1)}, false},
+		{"missing-channel", []*pb.GenerateEvent{accepted(), &pb.GenerateEvent{RequestId: 42, Payload: &pb.GenerateEvent_Token{Token: &pb.Token{OutputTokens: 1}}}}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -112,6 +113,31 @@ func TestProtocolValidation(t *testing.T) {
 				t.Fatal("outgoing context was not released")
 			}
 		})
+	}
+}
+
+func TestChannelAwareReasoningStream(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	reasoning := token(1, []byte("why"))
+	reasoning.GetToken().Channel = pb.TokenChannel_TOKEN_CHANNEL_REASONING
+	flush := token(1, []byte(" later"))
+	flush.GetToken().Channel = pb.TokenChannel_TOKEN_CHANNEL_REASONING
+	flush.GetToken().AdvancesOutputTokens = false
+	api := &fakeAPI{stream: &fakeStream{events: []*pb.GenerateEvent{accepted(), reasoning, flush, token(2, []byte("answer")), finished(2)}}}
+	request := request()
+	request.EnableThinking = true
+	var pieces []OutputPiece
+	result, err := (&Client{api: api}).GeneratePieces(ctx, request, func(piece OutputPiece) error {
+		pieces = append(pieces, OutputPiece{Bytes: append([]byte(nil), piece.Bytes...), Channel: piece.Channel, AdvancesOutputTokens: piece.AdvancesOutputTokens})
+		return nil
+	})
+	if err != nil || !result.TransportComplete || result.ReceivedTokens != 2 || len(pieces) != 3 || pieces[0].Channel != pb.TokenChannel_TOKEN_CHANNEL_REASONING || string(pieces[0].Bytes) != "why" || pieces[1].AdvancesOutputTokens || string(pieces[1].Bytes) != " later" || pieces[2].Channel != pb.TokenChannel_TOKEN_CHANNEL_CONTENT || string(pieces[2].Bytes) != "answer" {
+		t.Fatalf("result=%+v pieces=%+v err=%v", result, pieces, err)
+	}
+	api = &fakeAPI{}
+	if _, err := (&Client{api: api}).Generate(ctx, request, nil); status.Code(err) != codes.InvalidArgument || api.ctx != nil {
+		t.Fatal("legacy byte consumer accepted a thinking request")
 	}
 }
 

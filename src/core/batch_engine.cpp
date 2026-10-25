@@ -10,6 +10,15 @@
 
 namespace inferno {
 namespace {
+struct DeliveredPiece {
+    std::string bytes;
+    OutputChannel channel = OutputChannel::content;
+    bool advances_output_tokens = true;
+    std::uint32_t tool_call_index = 0;
+    std::string tool_call_id;
+    std::string tool_name;
+};
+
 void advance(RequestLifecycle& lifecycle, RequestState next) {
     if (!lifecycle.transition_to(next)) throw std::logic_error("Invalid batch-engine lifecycle transition");
 }
@@ -28,7 +37,7 @@ struct ContinuousBatchEngine::ActiveSlot {
     SequenceId sequence_id = 0;
     std::unique_ptr<WorkItem> item;
     GenerationResult result;
-    std::unique_ptr<BoundedQueue<std::string>> delivery;
+    std::unique_ptr<BoundedQueue<DeliveredPiece>> delivery;
     std::thread delivery_thread;
     std::atomic<bool> delivery_done{true};
     std::mutex delivery_error_mutex;
@@ -46,7 +55,7 @@ ContinuousBatchEngine::ContinuousBatchEngine(std::unique_ptr<BatchExecutor> exec
     if (!executor_) throw std::invalid_argument("Batch engine requires an executor");
     if (config_.active_sequences != 2 || config_.waiting_capacity != 2 ||
         config_.per_sequence_context_tokens == 0 || config_.max_output_tokens == 0 ||
-        config_.max_output_tokens > 512 || config_.prefill_chunk_tokens == 0 ||
+        config_.max_output_tokens > config_.per_sequence_context_tokens || config_.prefill_chunk_tokens == 0 ||
         config_.delivery_capacity == 0) {
         throw std::invalid_argument("Invalid conservative batch-engine configuration");
     }
@@ -105,6 +114,10 @@ std::optional<MemorySnapshot> ContinuousBatchEngine::memory_snapshot() const {
     return executor_->memory_snapshot();
 }
 
+std::optional<ModelCapabilities> ContinuousBatchEngine::model_capabilities() const {
+    return executor_->model_capabilities();
+}
+
 void ContinuousBatchEngine::shutdown() {
     std::lock_guard join_lock(shutdown_mutex_);
     {
@@ -143,12 +156,15 @@ bool ContinuousBatchEngine::admit_one(std::unique_ptr<WorkItem> item) {
         }
         advance(*slot->item->lifecycle, RequestState::prefill);
         if (slot->item->token) {
-            slot->delivery = std::make_unique<BoundedQueue<std::string>>(config_.delivery_capacity);
+            slot->delivery = std::make_unique<BoundedQueue<DeliveredPiece>>(config_.delivery_capacity);
             slot->delivery_done.store(false);
             auto* raw = slot.get();
             slot->delivery_thread = std::thread([this, raw] {
                 try {
-                    while (auto piece = raw->delivery->wait_pop()) raw->item->token(*piece);
+                    while (auto piece = raw->delivery->wait_pop()) {
+                        raw->item->token({piece->bytes, piece->channel, piece->advances_output_tokens,
+                            piece->tool_call_index, piece->tool_call_id, piece->tool_name});
+                    }
                 } catch (const std::exception& error) {
                     std::lock_guard error_lock(raw->delivery_error_mutex);
                     raw->delivery_error = error.what();
@@ -309,7 +325,7 @@ void ContinuousBatchEngine::work() {
                     advance(*slot.item->lifecycle, RequestState::decoding);
                     slot.item->timings.decode_started = RequestClock::now();
                 }
-                if (match->token_piece) {
+                if (match->generated_token) {
                     if (slot.item->lifecycle->state() != RequestState::decoding ||
                         slot.item->timings.output_tokens >= slot.item->request.max_output_tokens) {
                         throw std::logic_error("Invalid batch token event or output budget exceeded");
@@ -318,10 +334,22 @@ void ContinuousBatchEngine::work() {
                     if (!slot.item->timings.first_token) slot.item->timings.first_token = now;
                     slot.item->timings.last_token = now;
                     ++slot.item->timings.output_tokens;
-                    slot.result.text.append(*match->token_piece);
-                    if (slot.delivery && slot.delivery->try_push(std::string(*match->token_piece)) != PushResult::accepted) {
+                } else if (!match->output_pieces.empty() && slot.item->timings.output_tokens == 0) {
+                    throw std::logic_error("Batch parser output preceded native token generation");
+                }
+                bool advances = match->generated_token;
+                if (match->output_pieces.empty() && match->generated_token) {
+                    if (slot.delivery && slot.delivery->try_push({{}, OutputChannel::content, true}) != PushResult::accepted) {
                         throw std::runtime_error("Token consumer exceeded bounded delivery capacity");
                     }
+                }
+                for (const auto& piece : match->output_pieces) {
+                    if (piece.channel != OutputChannel::tool_call) slot.result.text.append(piece.bytes);
+                    if (slot.delivery && slot.delivery->try_push({piece.bytes, piece.channel, advances,
+                            piece.tool_call_index, piece.tool_call_id, piece.tool_name}) != PushResult::accepted) {
+                        throw std::runtime_error("Token consumer exceeded bounded delivery capacity");
+                    }
+                    advances = false;
                 }
                 slot.item->control->checkpoint();
                 if (!match->error.empty()) retire(i, RequestState::failed, match->error);

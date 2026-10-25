@@ -11,7 +11,7 @@ TEST(LlamaBackendIntegration, WorkerGeneratesAndRecoversAfterOversizeRequest) {
     std::string streamed;
     unsigned events = 0;
     auto first = runtime.submit({1, "What is 2 + 2? Reply with just the number.", 1, {}},
-                               [&](std::string_view piece) { streamed += piece; ++events; });
+                               [&](inferno::GeneratedPiece piece) { streamed += piece.bytes; ++events; });
     auto answer = first.completion.get();
     EXPECT_EQ(answer.state, inferno::RequestState::completed) << answer.error;
     EXPECT_EQ(answer.text, "4");
@@ -29,14 +29,14 @@ TEST(LlamaBackendIntegration, WorkerGeneratesAndRecoversAfterOversizeRequest) {
     EXPECT_EQ(failed.state, inferno::RequestState::failed);
     EXPECT_NE(failed.error.find("exceeds configured context"), std::string::npos);
     auto disconnected = runtime.submit({4, "What is 9 + 9? Reply with just the number.", 4, {}},
-                                      [](std::string_view) { throw std::runtime_error("stop stream"); }).completion.get();
+                                      [](inferno::GeneratedPiece) { throw std::runtime_error("stop stream"); }).completion.get();
     EXPECT_EQ(disconnected.state, inferno::RequestState::failed);
     EXPECT_EQ(disconnected.metrics.output_tokens, 1U);
     EXPECT_EQ(disconnected.error, "stop stream");
     std::promise<std::shared_ptr<inferno::RequestControl>> published;
     auto control = published.get_future().share();
     auto cancelled = runtime.submit({5, "Explain what a CPU does in one short sentence.", 64, {}},
-                                    [&](std::string_view) { (void) control.get()->cancel(); });
+                                    [&](inferno::GeneratedPiece) { (void) control.get()->cancel(); });
     published.set_value(cancelled.control);
     const auto stopped = cancelled.completion.get();
     EXPECT_EQ(stopped.state, inferno::RequestState::cancelled);

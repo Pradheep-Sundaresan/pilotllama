@@ -12,7 +12,7 @@ namespace {
 using namespace inferno;
 
 GenerationRequest request(RequestId id, std::string prompt = "three", std::uint32_t output = 32) {
-    return {id, std::move(prompt), output, std::nullopt};
+    return {id, std::move(prompt), output, std::nullopt, {}};
 }
 
 struct Trace {
@@ -38,7 +38,7 @@ public:
     explicit FakeBatchExecutor(std::shared_ptr<Trace> trace) : trace_(std::move(trace)) {}
 
     std::size_t admit(SequenceId sequence, const GenerationRequest& request) override {
-        states_[sequence] = {request.id, 0, request.prompt == "long" ? 6U : 3U};
+        states_[sequence] = {request.id, 0, request.prompt == "long" ? 6U : 3U, request.enable_thinking};
         return request.prompt == "oversized" ? 2000U : 8U;
     }
 
@@ -71,8 +71,13 @@ public:
         for (auto sequence : sequences) {
             auto& state = states_.at(sequence);
             const auto number = state.emitted++;
-            events.push_back({sequence, number == 0, std::to_string(state.id) + ":" + std::to_string(number),
-                              state.emitted == state.tokens, {}});
+            BatchStepEvent event{sequence, false, false, {}, false, {}};
+            event.decode_started = number == 0;
+            event.generated_token = true;
+            event.output_pieces.push_back({std::to_string(state.id) + ":" + std::to_string(number),
+                state.thinking && number == 0 ? OutputChannel::reasoning : OutputChannel::content});
+            event.finished = state.emitted == state.tokens;
+            events.push_back(std::move(event));
         }
         return events;
     }
@@ -88,7 +93,7 @@ public:
     }
 
 private:
-    struct State { RequestId id; unsigned emitted; unsigned tokens; };
+    struct State { RequestId id; unsigned emitted; unsigned tokens; bool thinking; };
     std::shared_ptr<Trace> trace_;
     std::map<SequenceId, State> states_;
 };
@@ -98,6 +103,12 @@ TEST(BatchEngine, RequiresConservativeBoundedConfiguration) {
     auto trace = std::make_shared<Trace>();
     BatchEngineConfig config;
     config.active_sequences = 3;
+    EXPECT_THROW(ContinuousBatchEngine(std::make_unique<FakeBatchExecutor>(trace), config), std::invalid_argument);
+    config = {};
+    config.per_sequence_context_tokens = 4096;
+    config.max_output_tokens = 1024;
+    EXPECT_NO_THROW(ContinuousBatchEngine(std::make_unique<FakeBatchExecutor>(trace), config));
+    config.max_output_tokens = 4097;
     EXPECT_THROW(ContinuousBatchEngine(std::make_unique<FakeBatchExecutor>(trace), config), std::invalid_argument);
 }
 
@@ -119,6 +130,17 @@ TEST(BatchEngine, InterleavesTwoActiveRequestsAndRoutesTokens) {
     auto removed = trace->removed;
     std::sort(removed.begin(), removed.end());
     EXPECT_EQ(removed, (std::vector<RequestId>{1, 2}));
+}
+
+TEST(BatchEngine, PreservesReasoningChannelThroughBoundedDelivery) {
+    auto trace = std::make_shared<Trace>();
+    ContinuousBatchEngine engine(std::make_unique<FakeBatchExecutor>(trace));
+    auto value = request(1);
+    value.enable_thinking = true;
+    std::vector<OutputChannel> channels;
+    auto submission = engine.submit(std::move(value), [&](GeneratedPiece piece) { channels.push_back(piece.channel); });
+    EXPECT_EQ(submission.completion.get().state, RequestState::completed);
+    EXPECT_EQ(channels, (std::vector<OutputChannel>{OutputChannel::reasoning, OutputChannel::content, OutputChannel::content}));
 }
 
 TEST(BatchEngine, KeepsTwoWaitingSlotsBounded) {
@@ -201,7 +223,7 @@ TEST(BatchEngine, SlowConsumerCannotStopAnotherSequence) {
     std::promise<void> consumer_entered;
     std::promise<void> release_consumer;
     auto released = release_consumer.get_future().share();
-    auto slow = engine.submit(request(1, "long"), [&](std::string_view) {
+    auto slow = engine.submit(request(1, "long"), [&](GeneratedPiece) {
         consumer_entered.set_value();
         released.wait();
     });

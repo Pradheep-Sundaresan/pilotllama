@@ -156,25 +156,42 @@ also verifies discovery followed by generation using the returned alias.
 | Field | Support |
 | --- | --- |
 | `model` | Required string matching the READY backend's supplied model alias |
-| `messages` | Exactly one object with role `user` and string content; existing fixed single-turn native template applies |
+| `messages` | 1–64 messages: optional leading `system`; user/assistant turns; assistant tool calls followed by exactly matching `tool` results; ends in user input or complete tool results; total bounded to 1 MiB |
 | `stream` | Boolean, default false |
-| `max_completion_tokens` or `max_tokens` | One or the other; integer 1–512; default 128 |
-| `temperature` | Omitted or 0; generation remains greedy |
+| `max_completion_tokens` or `max_tokens` | One or the other; integer 1–the configured runtime output budget; default request 128, default runtime cap 512 |
+| `thinking` | Optional PilotLlama extension; boolean, default false. True requires a loaded template whose thinking capability is detected or verified. |
+| `temperature` | Number 0–2; default 0 selects greedy decoding |
+| `top_p` | Number greater than 0 through 1; default 1 |
+| `top_k` | Integer 0–100000; default 0 disables top-k filtering |
+| `seed` | Optional unsigned 32-bit integer; the same model/configuration/request and seed are reproducible |
+| `stop` | One string or up to four strings; each 1–256 UTF-8 bytes and at most 512 bytes total; matched text is excluded |
+| `tools` | Up to 16 function definitions with unique bounded names, descriptions and JSON-object parameter schemas; passed only to detected/verified templates |
+| `tool_choice` | String `none`, `auto`, or `required`; defaults to `auto` with tools and `none` without tools |
+| `response_format` | `text` (default), `json_object`, or named strict `json_schema`; schema at most 64 KiB. Structured output and tools are mutually exclusive. |
 | `n` | Omitted or 1 |
 
-Unknown fields are rejected rather than ignored. System/developer messages, chat
-history, tools, multimodal content, stop sequences, sampling controls, logprobs,
-response schemas, stream_options/usage chunks and OpenAI model-deletion APIs are not
-supported. The model alias is not a verified artifact hash. Authorization headers
-are not authentication yet; the service remains loopback-only with no remote mode.
-Infrastructure authentication/rate policy remains another approved milestone.
+Unknown fields are rejected rather than ignored. A loaded model's embedded llama.cpp
+chat template must report support for requested system messages, multi-turn history
+and opt-in thinking; unsupported combinations fail before native admission. JSON
+uses separate `message.reasoning_content`; SSE uses separate
+`delta.reasoning_content` chunks. Reasoning and final content share the 1 MiB byte
+bound and configured native output-token budget. The documented
+template-less Nemotron fallback accepts one user message only. Developer messages,
+multimodal content, logprobs, stream_options/usage chunks and OpenAI model-deletion APIs are not supported.
+Validated calls return as JSON `message.tool_calls` or indexed SSE
+`delta.tool_calls` fragments and uses `finish_reason:"tool_calls"`. Names must match a
+submitted definition, arguments must finish as bounded JSON objects, and missing model
+IDs receive stable request-local IDs. PilotLlama never executes tools; applications
+execute them and submit their results as matching `tool` messages.
+The model alias is not a verified artifact hash. The service remains loopback-only.
 
-Requests require application/json, a body of at most 128 KiB and a prompt of at most
-65536 UTF-8 bytes without template control delimiters. The native context limit
-still applies after tokenization; a native context-budget failure currently returns
-a sanitized backend error, not an invented prompt-token count. Malformed JSON,
-unknown fields and unsupported values fail before generation. Go's standard JSON
-string decoding semantics apply to escapes; raw non-UTF-8 bodies are rejected.
+Requests require application/json and a body of at most 1 MiB + 64 KiB. Message
+content must be UTF-8, total at most 1 MiB, and exclude template control delimiters.
+The configured native context limit still applies after the complete conversation is
+templated and tokenized; a context-budget failure returns a sanitized backend error,
+not an invented prompt-token count. Malformed JSON, invalid role order, unknown
+fields and unsupported values fail before generation. Go's standard JSON string
+decoding semantics apply to escapes; raw non-UTF-8 bodies are rejected.
 
 ## Responses and streaming
 
@@ -235,6 +252,16 @@ Authenticated `GET /internal/v1/memory` exposes the separate bounded native
 [memory snapshot](memory-observability.md). It reports macOS process accounting and
 llama.cpp allocations without adding them together. It is not part of the public
 OpenAI-compatible API and does not populate the completion-window memory field.
+
+Authenticated `GET /internal/v1/model-capabilities` exposes facts from the loaded
+GGUF and bounded template-rendering probes performed by the C++ backend. It reports
+architecture, parameter count, declared training context, encoder/decoder shape,
+template source and separate support states for queue mode, continuous mode, system
+messages, multi-turn prompts, thinking and tools. `detected` means the pinned
+renderer accepted the probe; it is not a generation or quality claim. `verified`
+is reserved for an exact tested PilotLlama path, while `unqualified` remains unknown.
+The same report exposes the configured context and per-request output budgets beside
+the model's declared trained-context maximum.
 
 Authenticated [admission drain/resume controls](admission-controls.md) can pause new
 generation without cancelling existing handlers or unloading the model. They report

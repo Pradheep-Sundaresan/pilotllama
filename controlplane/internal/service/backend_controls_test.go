@@ -3,14 +3,19 @@ package service
 import (
 	"context"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 )
 
 type controlBackend struct {
 	authBackend
-	starts, stops    atomic.Int32
-	entered, release chan struct{}
+	starts, stops               atomic.Int32
+	entered, release            chan struct{}
+	configured                  bool
+	model, modelID, batching    string
+	contextTokens, outputTokens uint32
 }
 
 func (b *controlBackend) State() string { return "stopped" }
@@ -27,6 +32,34 @@ func (b *controlBackend) Start(ctx context.Context) error {
 	return nil
 }
 func (b *controlBackend) Stop(context.Context) error { b.stops.Add(1); return nil }
+func (b *controlBackend) Reconfigure(model, modelID, batching string, contextTokens, outputTokens uint32, _ bool) error {
+	b.configured, b.model, b.modelID, b.batching = true, model, modelID, batching
+	b.contextTokens, b.outputTokens = contextTokens, outputTokens
+	return nil
+}
+
+func TestApplyModelConfigRestartsManagedBackend(t *testing.T) {
+	s, _ := authenticatedService(t, testSecret)
+	dir := t.TempDir()
+	model := filepath.Join(dir, "model.gguf")
+	if err := os.WriteFile(model, []byte("GGUFfixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range map[string]string{
+		"model.path": model + "\n", "model.id": "local-test\n", "batching": "queue\n",
+		"context.tokens": "8192\n", "max-output.tokens": "1024\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(value), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b := &controlBackend{}
+	s.managed, s.modelConfigDir = b, dir
+	w := controlRequest(s, "POST", "/internal/v1/model-config/apply", testSecret)
+	if w.Code != 200 || !b.configured || b.stops.Load() != 1 || b.starts.Load() != 1 || b.model != model || b.modelID != "local-test" || b.batching != "queue" || b.contextTokens != 8192 || b.outputTokens != 1024 || s.admissionSnapshot().State != "drained" {
+		t.Fatalf("apply failed: status=%d body=%s backend=%+v", w.Code, w.Body, b)
+	}
+}
 
 func TestBackendControlSafetyAndOverlap(t *testing.T) {
 	s, _ := authenticatedService(t, testSecret)

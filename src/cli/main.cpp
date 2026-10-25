@@ -15,7 +15,8 @@ namespace {
 void print_help() {
     std::cout << "INFERNO — Local AI Inference Platform\n"
                  "Usage: inferno [--help | --version]\n"
-                 "       inferno generate --model PATH --prompt TEXT [--max-tokens 1..512]\n"
+                 "       inferno generate --model PATH --prompt TEXT [--max-tokens N]\n"
+                 "                        [--context-tokens 32..1048576]\n"
                  "                        [--stream] [--metrics] [--timeout-ms 1..3600000]\n\n"
                  "Generation requires the native build and a supported local GGUF.\n";
 }
@@ -34,8 +35,9 @@ int main(int argc, char* argv[]) {
         std::string model;
         std::string prompt;
         std::uint32_t max_tokens = 64;
+        std::uint32_t context_tokens = 4096;
         std::optional<std::uint32_t> timeout_ms;
-        bool have_model = false, have_prompt = false, have_limit = false;
+        bool have_model = false, have_prompt = false, have_limit = false, have_context = false;
         bool stream = false, metrics = false;
         for (int i = 2; i < argc;) {
             const std::string_view key{argv[i]};
@@ -59,11 +61,19 @@ int main(int argc, char* argv[]) {
             } else if (key == "--max-tokens" && !have_limit) {
                 const auto parsed = std::from_chars(value.data(), value.data() + value.size(), max_tokens);
                 if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() ||
-                    max_tokens == 0 || max_tokens > 512) {
-                    std::cerr << "--max-tokens must be an integer from 1 to 512.\n";
+                    max_tokens == 0 || max_tokens > 1048576) {
+                    std::cerr << "--max-tokens must be an integer from 1 to 1048576.\n";
                     return 2;
                 }
                 have_limit = true;
+            } else if (key == "--context-tokens" && !have_context) {
+                const auto parsed = std::from_chars(value.data(), value.data() + value.size(), context_tokens);
+                if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() ||
+                    context_tokens < 32 || context_tokens > 1048576) {
+                    std::cerr << "--context-tokens must be an integer from 32 to 1048576.\n";
+                    return 2;
+                }
+                have_context = true;
             } else if (key == "--timeout-ms" && !timeout_ms) {
                 std::uint32_t value_ms = 0;
                 const auto parsed = std::from_chars(value.data(), value.data() + value.size(), value_ms);
@@ -83,21 +93,26 @@ int main(int argc, char* argv[]) {
             std::cerr << "generate requires --model and --prompt.\n";
             return 2;
         }
+        if (max_tokens > context_tokens) {
+            std::cerr << "--max-tokens must fit inside --context-tokens.\n";
+            return 2;
+        }
         try {
             inferno::validate_user_prompt(prompt);
 #ifdef INFERNO_WITH_LLAMA
-            inferno::Runtime runtime(inferno::make_llama_backend({model}), 2);
+            inferno::Runtime runtime(inferno::make_llama_backend({.path = model,
+                .context_tokens = context_tokens, .max_output_tokens = max_tokens}), 2);
             inferno::InferenceBackend::TokenCallback token;
             if (stream) {
-                token = [](std::string_view piece) {
-                    std::cout.write(piece.data(), static_cast<std::streamsize>(piece.size()));
+                token = [](inferno::GeneratedPiece piece) {
+                    std::cout.write(piece.bytes.data(), static_cast<std::streamsize>(piece.bytes.size()));
                     std::cout.flush();
                     if (!std::cout) throw std::runtime_error("Output stream write failed");
                 };
             }
             std::optional<inferno::RequestClock::time_point> deadline;
             if (timeout_ms) deadline = inferno::RequestClock::now() + std::chrono::milliseconds(*timeout_ms);
-            auto submission = runtime.submit({1, prompt, max_tokens, deadline}, std::move(token));
+            auto submission = runtime.submit({1, prompt, max_tokens, deadline, {}}, std::move(token));
             const auto result = submission.completion.get();
             if (metrics) std::cerr << inferno::metrics_json(result.id, result.state, result.metrics) << '\n';
             if (result.state != inferno::RequestState::completed) {

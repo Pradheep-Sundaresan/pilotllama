@@ -45,6 +45,27 @@ func (m *Manager) State() string {
 	return m.state
 }
 
+// Reconfigure replaces only operator-selectable runtime values while fully stopped.
+func (m *Manager) Reconfigure(model, modelID, batching string, contextTokens, maxOutputTokens uint32, qualify bool) error {
+	if !m.operation.TryLock() {
+		return status.Error(codes.Aborted, "lifecycle operation in progress")
+	}
+	defer m.operation.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed || m.state != "stopped" {
+		return status.Error(codes.Aborted, "backend must be stopped before reconfiguration")
+	}
+	next := m.config
+	next.Model, next.ModelID, next.Batching = model, modelID, batching
+	next.ContextTokens, next.MaxOutputTokens, next.QualifyContinuous = contextTokens, maxOutputTokens, qualify
+	if err := next.Validate(); err != nil {
+		return err
+	}
+	m.config = next
+	return nil
+}
+
 func (m *Manager) Start(ctx context.Context) error {
 	if !m.operation.TryLock() {
 		return status.Error(codes.Aborted, "lifecycle operation in progress")
@@ -176,4 +197,12 @@ func (m *Manager) Generate(ctx context.Context, request *pb.GenerateRequest, con
 		return rpcbackend.Observation{}, err
 	}
 	return client.Generate(ctx, request, consume)
+}
+
+func (m *Manager) GeneratePieces(ctx context.Context, request *pb.GenerateRequest, consume func(rpcbackend.OutputPiece) error) (rpcbackend.Observation, error) {
+	client, err := m.rpc()
+	if err != nil {
+		return rpcbackend.Observation{}, err
+	}
+	return client.GeneratePieces(ctx, request, consume)
 }

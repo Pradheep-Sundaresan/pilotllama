@@ -29,16 +29,39 @@ TEST(ProtoBindings, PreservesRawTokenBytesAndFullWidthIds) {
     source.set_request_id(std::numeric_limits<std::uint64_t>::max());
     source.mutable_token()->set_piece(std::string("\xf0\x9f\0", 3));
     source.mutable_token()->set_output_tokens(1);
+    source.mutable_token()->set_channel(inferno::v1::TOKEN_CHANNEL_REASONING);
+    source.mutable_token()->set_advances_output_tokens(true);
     wire::GenerateEvent copy;
     ASSERT_TRUE(copy.ParseFromString(source.SerializeAsString()));
     EXPECT_EQ(copy.request_id(), std::numeric_limits<std::uint64_t>::max());
     ASSERT_TRUE(copy.has_token());
     EXPECT_EQ(copy.token().piece(), std::string("\xf0\x9f\0", 3));
+    EXPECT_EQ(copy.token().channel(), inferno::v1::TOKEN_CHANNEL_REASONING);
+    EXPECT_TRUE(copy.token().advances_output_tokens());
     source.mutable_token()->clear_piece();
     ASSERT_TRUE(copy.ParseFromString(source.SerializeAsString()));
     EXPECT_TRUE(copy.has_token());
     EXPECT_TRUE(copy.token().piece().empty());
     EXPECT_EQ(copy.token().output_tokens(), 1U);
+}
+
+TEST(ProtoBindings, PreservesStructuredChatMessages) {
+    inferno::v1::GenerateRequest source;
+    source.set_request_id(9); source.set_max_output_tokens(32); source.set_enable_thinking(true);
+    auto* system = source.add_messages(); system->set_role(inferno::v1::CHAT_ROLE_SYSTEM); system->set_content("brief");
+    auto* user = source.add_messages(); user->set_role(inferno::v1::CHAT_ROLE_USER); user->set_content("hello");
+    inferno::v1::GenerateRequest copy;
+    ASSERT_TRUE(copy.ParseFromString(source.SerializeAsString()));
+    ASSERT_EQ(copy.messages_size(), 2);
+    EXPECT_EQ(copy.messages(0).role(), inferno::v1::CHAT_ROLE_SYSTEM);
+    EXPECT_EQ(copy.messages(1).content(), "hello");
+    EXPECT_TRUE(copy.prompt().empty());
+    EXPECT_TRUE(copy.enable_thinking());
+	copy.mutable_messages(1)->set_role(inferno::v1::CHAT_ROLE_ASSISTANT);
+	auto* call = copy.mutable_messages(1)->add_tool_calls(); call->set_id("call_1"); call->set_name("weather"); call->set_arguments_json("{}");
+	copy.set_response_format(inferno::v1::RESPONSE_FORMAT_JSON_SCHEMA); copy.set_response_schema_json("{\"type\":\"object\"}");
+	inferno::v1::GenerateRequest roundtrip; ASSERT_TRUE(roundtrip.ParseFromString(copy.SerializeAsString()));
+	EXPECT_EQ(roundtrip.messages(1).tool_calls(0).id(), "call_1"); EXPECT_EQ(roundtrip.response_format(), inferno::v1::RESPONSE_FORMAT_JSON_SCHEMA);
 }
 
 TEST(ProtoBindings, PreservesMemoryPresenceAndRows) {
@@ -62,6 +85,31 @@ TEST(ProtoBindings, PreservesMemoryPresenceAndRows) {
     EXPECT_FALSE(copy.memory().has_model_tensor_bytes());
     ASSERT_EQ(copy.memory().llama_buffers_size(), 1);
     EXPECT_EQ(copy.memory().llama_buffers(0).context_bytes(), 20U);
+}
+
+TEST(ProtoBindings, PreservesModelCapabilities) {
+    wire::GetStatusResponse source;
+    auto* capabilities = source.mutable_model_capabilities();
+    capabilities->set_architecture("gemma4");
+    capabilities->set_parameter_count(8000000000ULL);
+    capabilities->set_trained_context_tokens(131072);
+    capabilities->set_configured_context_tokens(8192);
+    capabilities->set_configured_max_output_tokens(1024);
+    capabilities->set_has_decoder(true);
+    capabilities->set_has_embedded_chat_template(true);
+    capabilities->set_compatibility(wire::COMPATIBILITY_LEVEL_COMPATIBLE);
+    capabilities->set_template_source(wire::PROMPT_TEMPLATE_SOURCE_EMBEDDED);
+    capabilities->set_queue_mode(wire::CAPABILITY_SUPPORT_DETECTED);
+    capabilities->set_continuous_mode(wire::CAPABILITY_SUPPORT_UNQUALIFIED);
+    wire::GetStatusResponse copy;
+    ASSERT_TRUE(copy.ParseFromString(source.SerializeAsString()));
+    ASSERT_TRUE(copy.has_model_capabilities());
+    EXPECT_EQ(copy.model_capabilities().architecture(), "gemma4");
+    EXPECT_EQ(copy.model_capabilities().parameter_count(), 8000000000ULL);
+    EXPECT_EQ(copy.model_capabilities().trained_context_tokens(), 131072U);
+    EXPECT_EQ(copy.model_capabilities().configured_context_tokens(), 8192U);
+    EXPECT_EQ(copy.model_capabilities().configured_max_output_tokens(), 1024U);
+    EXPECT_EQ(copy.model_capabilities().continuous_mode(), wire::CAPABILITY_SUPPORT_UNQUALIFIED);
 }
 
 TEST(ProtoBindings, OneofAndStructuredFailureRoundTrip) {
@@ -117,6 +165,7 @@ TEST(ProtoBindings, CrossLanguageWire) {
         token.set_request_id(std::numeric_limits<std::uint64_t>::max());
         token.mutable_token()->set_piece(std::string("\xf0\x9f\0", 3));
         token.mutable_token()->set_output_tokens(1);
+        token.mutable_token()->set_channel(inferno::v1::TOKEN_CHANNEL_CONTENT);
         std::ofstream token_file(root / "cpp-token.bin", std::ios::binary);
         ASSERT_TRUE(token.SerializeToOstream(&token_file));
         token_file.close();

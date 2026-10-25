@@ -5,6 +5,8 @@
 #include <arpa/inet.h>
 #include <algorithm>
 #include <charconv>
+#include <cctype>
+#include <cmath>
 #include <condition_variable>
 #include <limits>
 #include <stdexcept>
@@ -13,7 +15,7 @@
 namespace inferno {
 namespace {
 namespace wire = inferno::v1;
-constexpr int message_limit = 128 * 1024;
+constexpr int message_limit = 2 * 1024 * 1024;
 constexpr std::size_t piece_limit = 64 * 1024;
 using grpc::Status;
 using grpc::StatusCode;
@@ -97,6 +99,37 @@ void memory(const MemorySnapshot& source, wire::MemorySnapshot* target) {
     target->set_configured_gpu_layers(source.configured_gpu_layers);
 }
 
+wire::CapabilitySupport capability_support(CapabilitySupport value) {
+    switch (value) {
+    case CapabilitySupport::unavailable: return wire::CAPABILITY_SUPPORT_UNAVAILABLE;
+    case CapabilitySupport::detected: return wire::CAPABILITY_SUPPORT_DETECTED;
+    case CapabilitySupport::verified: return wire::CAPABILITY_SUPPORT_VERIFIED;
+    case CapabilitySupport::unqualified: return wire::CAPABILITY_SUPPORT_UNQUALIFIED;
+    }
+    return wire::CAPABILITY_SUPPORT_UNSPECIFIED;
+}
+
+void model_capabilities(const ModelCapabilities& source, wire::ModelCapabilities* target) {
+    target->set_architecture(source.architecture);
+    target->set_parameter_count(source.parameter_count);
+    target->set_trained_context_tokens(source.trained_context_tokens);
+    target->set_configured_context_tokens(source.configured_context_tokens);
+    target->set_configured_max_output_tokens(source.configured_max_output_tokens);
+    target->set_has_encoder(source.has_encoder);
+    target->set_has_decoder(source.has_decoder);
+    target->set_has_embedded_chat_template(source.has_embedded_chat_template);
+    target->set_compatibility(source.compatibility == CompatibilityLevel::verified
+        ? wire::COMPATIBILITY_LEVEL_VERIFIED : wire::COMPATIBILITY_LEVEL_COMPATIBLE);
+    target->set_template_source(source.template_source == PromptTemplateSource::verified_fallback
+        ? wire::PROMPT_TEMPLATE_SOURCE_VERIFIED_FALLBACK : wire::PROMPT_TEMPLATE_SOURCE_EMBEDDED);
+    target->set_queue_mode(capability_support(source.queue_mode));
+    target->set_continuous_mode(capability_support(source.continuous_mode));
+    target->set_system_messages(capability_support(source.system_messages));
+    target->set_multi_turn(capability_support(source.multi_turn));
+    target->set_thinking(capability_support(source.thinking));
+    target->set_tools(capability_support(source.tools));
+}
+
 class Adapter;
 class Stream final : public grpc::ServerWriteReactor<wire::GenerateEvent> {
 public:
@@ -104,7 +137,7 @@ public:
            RequestClock::time_point deadline)
         : owner_(owner), context_(context), id_(id), deadline_(deadline) {}
     void start(Submission submission);
-    void emit(std::string_view piece);
+    void emit(GeneratedPiece piece);
     void reject(Status status) { writing_ = false; Finish(std::move(status)); }
     void OnWriteDone(bool ok) override;
     void OnCancel() override;
@@ -151,6 +184,9 @@ public:
         if (const auto memory_snapshot = runtime_.memory_snapshot()) {
             memory(*memory_snapshot, response->mutable_memory());
         }
+        if (const auto capabilities = runtime_.model_capabilities()) {
+            model_capabilities(*capabilities, response->mutable_model_capabilities());
+        }
         auto* reactor = context->DefaultReactor(); reactor->Finish(Status::OK); return reactor;
     }
     grpc::ServerUnaryReactor* Cancel(grpc::CallbackServerContext* context,
@@ -189,10 +225,104 @@ public:
             return reject(StatusCode::INVALID_ARGUMENT, wire::ERROR_CODE_INVALID_REQUEST, "Require deadline at most one hour");
         if (remaining <= decltype(remaining)::zero())
             return reject(StatusCode::DEADLINE_EXCEEDED, wire::ERROR_CODE_DEADLINE_EXCEEDED, "Request deadline exceeded");
-        if (!request->request_id() || !request->max_output_tokens() || request->max_output_tokens() > 512)
+        const auto capabilities = runtime_.model_capabilities();
+        if (!request->request_id() || !request->max_output_tokens() || !capabilities ||
+            request->max_output_tokens() > capabilities->configured_max_output_tokens)
             return reject(StatusCode::INVALID_ARGUMENT, wire::ERROR_CODE_INVALID_REQUEST, "Invalid generation request");
-        try { validate_user_prompt(request->prompt()); }
-        catch (const std::invalid_argument&) { return reject(StatusCode::INVALID_ARGUMENT, wire::ERROR_CODE_INVALID_REQUEST, "Invalid prompt"); }
+        GenerationRequest native_request{request->request_id(), request->prompt(), request->max_output_tokens(), deadline, {}, request->enable_thinking(),
+            request->temperature(), request->top_p() == 0.0F ? 1.0F : request->top_p(), request->top_k(),
+            request->has_seed() ? std::optional<std::uint32_t>{request->seed()} : std::nullopt, {}};
+        try {
+            if (!std::isfinite(native_request.temperature) || native_request.temperature < 0.0F || native_request.temperature > 2.0F ||
+                !std::isfinite(native_request.top_p) || native_request.top_p <= 0.0F || native_request.top_p > 1.0F ||
+                native_request.top_k < 0 || native_request.top_k > 100000 || request->stop_size() > 4)
+                throw std::invalid_argument("Invalid sampling configuration");
+            std::size_t stop_bytes = 0;
+            for (const auto& stop : request->stop()) {
+                if (stop.empty() || stop.size() > 256 || stop_bytes > 512 - stop.size())
+                    throw std::invalid_argument("Invalid stop sequence");
+                stop_bytes += stop.size();
+                native_request.stop.push_back(stop);
+            }
+            if (request->tools_size() > 16) throw std::invalid_argument("Too many tools");
+            std::size_t tool_bytes = 0;
+            std::unordered_map<std::string, bool> tool_names;
+            for (const auto& tool : request->tools()) {
+                const bool valid_name = !tool.name().empty() && tool.name().size() <= 64 &&
+                    std::all_of(tool.name().begin(), tool.name().end(), [](unsigned char c) {
+                        return std::isalnum(c) || c == '_' || c == '-';
+                    });
+                if (!valid_name || tool.description().size() > 1024 || tool.parameters_json().empty() ||
+                    tool.parameters_json().size() > 16384 || tool_bytes > 65536 - tool.parameters_json().size() ||
+                    tool_names.contains(tool.name())) throw std::invalid_argument("Invalid tool definition");
+                const auto first = tool.parameters_json().find_first_not_of(" \t\r\n");
+                const auto last = tool.parameters_json().find_last_not_of(" \t\r\n");
+                if (first == std::string::npos || tool.parameters_json()[first] != '{' ||
+                    tool.parameters_json()[last] != '}' || tool.parameters_json().find('\0') != std::string::npos)
+                    throw std::invalid_argument("Tool parameters must be a JSON object");
+                tool_bytes += tool.parameters_json().size();
+                tool_names.emplace(tool.name(), true);
+                native_request.tools.push_back({tool.name(), tool.description(), tool.parameters_json()});
+            }
+            switch (request->tool_choice()) {
+            case wire::TOOL_CHOICE_UNSPECIFIED:
+            case wire::TOOL_CHOICE_NONE: native_request.tool_choice = ToolChoice::none; break;
+            case wire::TOOL_CHOICE_AUTO: native_request.tool_choice = ToolChoice::automatic; break;
+            case wire::TOOL_CHOICE_REQUIRED: native_request.tool_choice = ToolChoice::required; break;
+            default: throw std::invalid_argument("Invalid tool choice");
+            }
+            if (native_request.tools.empty() && native_request.tool_choice != ToolChoice::none)
+                throw std::invalid_argument("Tool choice requires tools");
+			switch (request->response_format()) {
+			case wire::RESPONSE_FORMAT_UNSPECIFIED:
+			case wire::RESPONSE_FORMAT_TEXT: native_request.response_format = ResponseFormat::text; break;
+			case wire::RESPONSE_FORMAT_JSON_OBJECT: native_request.response_format = ResponseFormat::json_object; break;
+			case wire::RESPONSE_FORMAT_JSON_SCHEMA: native_request.response_format = ResponseFormat::json_schema; break;
+			default: throw std::invalid_argument("Invalid response format");
+			}
+			native_request.response_schema_json = request->response_schema_json();
+			if (native_request.response_format != ResponseFormat::text) {
+				if (!native_request.tools.empty() || native_request.response_schema_json.empty() || native_request.response_schema_json.size() > 65536)
+					throw std::invalid_argument("Invalid structured response");
+				const auto first = native_request.response_schema_json.find_first_not_of(" \t\r\n");
+				const auto last = native_request.response_schema_json.find_last_not_of(" \t\r\n");
+				if (first == std::string::npos || native_request.response_schema_json[first] != '{' || native_request.response_schema_json[last] != '}')
+					throw std::invalid_argument("Response schema must be an object");
+			}
+            if (!request->prompt().empty() == (request->messages_size() != 0))
+                throw std::invalid_argument("Require exactly one input form");
+            for (const auto& message : request->messages()) {
+                ChatRole role;
+                switch (message.role()) {
+                case wire::CHAT_ROLE_SYSTEM: role = ChatRole::system; break;
+                case wire::CHAT_ROLE_USER: role = ChatRole::user; break;
+                case wire::CHAT_ROLE_ASSISTANT: role = ChatRole::assistant; break;
+				case wire::CHAT_ROLE_TOOL: role = ChatRole::tool; break;
+                default: throw std::invalid_argument("Invalid chat role");
+                }
+				ChatMessage native_message{role, message.content()};
+				native_message.tool_call_id = message.tool_call_id();
+				for (const auto& call : message.tool_calls()) native_message.tool_calls.push_back({call.id(), call.name(), call.arguments_json()});
+				native_request.messages.push_back(std::move(native_message));
+            }
+            if (native_request.messages.empty()) validate_user_prompt(native_request.prompt);
+            else validate_chat_messages(native_request.messages);
+            const bool has_system = std::any_of(native_request.messages.begin(), native_request.messages.end(),
+                [](const auto& message) { return message.role == ChatRole::system; });
+            if (has_system && capabilities->system_messages == CapabilitySupport::unavailable)
+                throw std::invalid_argument("System messages unsupported");
+            if (native_request.messages.size() > (has_system ? 2U : 1U) &&
+                capabilities->multi_turn == CapabilitySupport::unavailable)
+                throw std::invalid_argument("Multi-turn chat unsupported");
+            if (native_request.enable_thinking && capabilities->thinking == CapabilitySupport::unavailable)
+                throw std::invalid_argument("Thinking unsupported");
+            if (!native_request.tools.empty() && capabilities->tools == CapabilitySupport::unavailable)
+                throw std::invalid_argument("Tools unsupported");
+			if (std::any_of(native_request.messages.begin(), native_request.messages.end(), [](const auto& message) { return message.role == ChatRole::tool || !message.tool_calls.empty(); }) &&
+				capabilities->tools == CapabilitySupport::unavailable) throw std::invalid_argument("Tool history unsupported");
+        } catch (const std::invalid_argument&) {
+            return reject(StatusCode::INVALID_ARGUMENT, wire::ERROR_CODE_INVALID_REQUEST, "Invalid or unsupported chat messages");
+        }
         std::lock_guard lock(mutex_);
         if (draining_ || !ready_) return reject(StatusCode::UNAVAILABLE, wire::ERROR_CODE_BACKEND_UNAVAILABLE, "Backend unavailable");
         if (active_.contains(request->request_id())) return reject(StatusCode::ALREADY_EXISTS, wire::ERROR_CODE_DUPLICATE_REQUEST_ID, "Duplicate request ID");
@@ -201,8 +331,8 @@ public:
         (void) inserted;
         Submission submission;
         try {
-            submission = runtime_.submit({request->request_id(), request->prompt(), request->max_output_tokens(), deadline},
-                [reactor = stream.get()](std::string_view piece) { reactor->emit(piece); });
+            submission = runtime_.submit(std::move(native_request),
+                [reactor = stream.get()](GeneratedPiece piece) { reactor->emit(piece); });
         } catch (...) {
             active_.erase(entry);
             return reject(StatusCode::INTERNAL, wire::ERROR_CODE_BACKEND_FAILURE, "Admission failed");
@@ -268,7 +398,7 @@ void Stream::start(Submission submission) {
     std::lock_guard lock(mutex_);
     event_.set_request_id(id_); event_.mutable_accepted(); StartWrite(&event_);
 }
-void Stream::emit(std::string_view piece) {
+void Stream::emit(GeneratedPiece piece) {
     std::unique_lock lock(mutex_);
     changed_.wait(lock, [&] { return !writing_ || stopped_ || cancel_tokens_; });
     if (stopped_ || cancel_tokens_) {
@@ -276,10 +406,26 @@ void Stream::emit(std::string_view piece) {
         if (deadline_stop_) throw RequestStopped(RequestStopped::Reason::timed_out);
         throw RequestStopped(RequestStopped::Reason::cancelled);
     }
-    if (piece.size() > piece_limit) throw std::length_error("Token piece exceeds transport bound");
+    const bool tool = piece.channel == OutputChannel::tool_call;
+    if (piece.bytes.size() > piece_limit || piece.tool_call_id.size() > 128 || piece.tool_name.size() > 64 ||
+        (tool && (piece.advances_output_tokens || piece.tool_call_index >= 16 ||
+            (piece.bytes.empty() && piece.tool_call_id.empty() && piece.tool_name.empty()))) ||
+        (!tool && (!piece.tool_call_id.empty() || !piece.tool_name.empty() || piece.tool_call_index != 0)) ||
+        (!piece.advances_output_tokens && ((piece.bytes.empty() && !tool) || count_ == 0))) {
+        throw std::length_error("Invalid token piece or transport bound exceeded");
+    }
     event_.Clear(); event_.set_request_id(id_);
-    if (!piece.empty()) event_.mutable_token()->set_piece(piece.data(), piece.size());
-    event_.mutable_token()->set_output_tokens(++count_);
+    if (!piece.bytes.empty()) event_.mutable_token()->set_piece(piece.bytes.data(), piece.bytes.size());
+    if (piece.advances_output_tokens) ++count_;
+    event_.mutable_token()->set_output_tokens(count_);
+    event_.mutable_token()->set_advances_output_tokens(piece.advances_output_tokens);
+    if (tool) {
+        event_.mutable_token()->set_channel(wire::TOKEN_CHANNEL_TOOL_CALL);
+        event_.mutable_token()->set_tool_call_index(piece.tool_call_index);
+        if (!piece.tool_call_id.empty()) event_.mutable_token()->set_tool_call_id(piece.tool_call_id.data(), piece.tool_call_id.size());
+        if (!piece.tool_name.empty()) event_.mutable_token()->set_tool_name(piece.tool_name.data(), piece.tool_name.size());
+    } else event_.mutable_token()->set_channel(piece.channel == OutputChannel::reasoning
+        ? wire::TOKEN_CHANNEL_REASONING : wire::TOKEN_CHANNEL_CONTENT);
     writing_ = true; StartWrite(&event_);
     changed_.wait(lock, [&] { return !writing_ || stopped_ || cancel_tokens_; });
     if (stopped_ || cancel_tokens_) {

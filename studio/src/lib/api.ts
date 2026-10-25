@@ -5,10 +5,12 @@ import type {
   BackendStatus,
   Health,
   MemoryReport,
+  ModelCapabilities,
   ModelConfig,
   RequestHistory,
   SchedulerReport,
-  StreamResult
+  StreamResult,
+  ToolCall
 } from "./types";
 
 export class ApiError extends Error {
@@ -61,7 +63,7 @@ async function settled<T>(promise: Promise<T>): Promise<T | null> {
 }
 
 export async function loadSnapshot(token: string): Promise<ApiSnapshot> {
-  const [health, ready, backend, admission, metrics, history, scheduler, memory, models, modelConfig] = await Promise.all([
+  const [health, ready, backend, admission, metrics, history, scheduler, memory, models, modelConfig, modelCapabilities] = await Promise.all([
     settled(requestJSON<Health>("/healthz")),
     settled(requestJSON<Health>("/readyz")),
     settled(requestJSON<BackendStatus>("/internal/v1/backend", token)),
@@ -71,7 +73,8 @@ export async function loadSnapshot(token: string): Promise<ApiSnapshot> {
     settled(requestJSON<SchedulerReport>("/internal/v1/scheduler", token)),
     settled(requestJSON<MemoryReport>("/internal/v1/memory", token)),
     settled(requestJSON<{ data: ApiSnapshot["models"] }>("/v1/models", token)),
-    settled(requestJSON<ModelConfig>("/internal/v1/model-config", token))
+    settled(requestJSON<ModelConfig>("/internal/v1/model-config", token)),
+    settled(requestJSON<ModelCapabilities>("/internal/v1/model-capabilities", token))
   ]);
 
   const reachable = health !== null;
@@ -86,13 +89,18 @@ export async function loadSnapshot(token: string): Promise<ApiSnapshot> {
     memory,
     models: models?.data ?? [],
     modelConfig,
+    modelCapabilities,
     error: reachable ? null : "PilotLlama API is not reachable at 127.0.0.1:8080.",
     refreshedAt: Date.now()
   };
 }
 
-export async function saveModelConfig(token: string, input: { path: string; model_id: string; batching: "queue" | "continuous" }) {
+export async function saveModelConfig(token: string, input: { path: string; model_id: string; batching: "queue" | "continuous"; context_tokens: number; max_output_tokens: number }) {
   return requestJSON<ModelConfig>("/internal/v1/model-config", token, { method: "PUT", body: JSON.stringify(input) });
+}
+
+export async function applyModelConfig(token: string) {
+  return requestJSON<{ state: string; model_id: string }>("/internal/v1/model-config/apply", token, { method: "POST" });
 }
 
 export async function control(
@@ -104,17 +112,25 @@ export async function control(
 
 type CompletionPayload = {
   model: string;
-  messages: { role: "user"; content: string }[];
+  messages: { role: "system" | "user" | "assistant"; content: string }[];
   max_tokens: number;
-  temperature: 0;
+  temperature: number;
+  top_p?: number;
+  top_k?: number;
+  seed?: number;
+  stop?: string[];
   n: 1;
   stream: boolean;
+  thinking?: boolean;
+  tools?: { type: "function"; function: { name: string; description?: string; parameters: Record<string, unknown> } }[];
+  tool_choice?: "none" | "auto" | "required";
+  response_format?: { type: "json_object" } | { type: "json_schema"; json_schema: { name: string; strict: true; schema: Record<string, unknown> } };
 };
 
 export async function complete(
   token: string,
   payload: CompletionPayload,
-  onToken: (token: string) => void,
+  onToken: (token: string, channel: "content" | "reasoning") => void,
   signal: AbortSignal
 ): Promise<StreamResult> {
   const response = await fetch("/v1/chat/completions", {
@@ -127,10 +143,12 @@ export async function complete(
   const requestID = response.headers.get("X-Request-ID");
 
   if (!payload.stream) {
-    const body = (await response.json()) as { choices?: { message?: { content?: string } }[] };
+    const body = (await response.json()) as { choices?: { message?: { content?: string; reasoning_content?: string; tool_calls?: ToolCall[] } }[] };
     const text = body.choices?.[0]?.message?.content ?? "";
-    onToken(text);
-    return { text, requestID };
+    const reasoning = body.choices?.[0]?.message?.reasoning_content ?? "";
+    onToken(reasoning, "reasoning");
+    onToken(text, "content");
+    return { text, reasoning, toolCalls: body.choices?.[0]?.message?.tool_calls ?? [], requestID };
   }
 
   if (!response.body) throw new ApiError("Streaming response body is unavailable", 502);
@@ -138,6 +156,8 @@ export async function complete(
   const decoder = new TextDecoder();
   let pending = "";
   let text = "";
+  let reasoning = "";
+  const toolCalls: ToolCall[] = [];
   while (true) {
     const { done, value } = await reader.read();
     pending += decoder.decode(value, { stream: !done });
@@ -151,15 +171,22 @@ export async function complete(
         .join("\n");
       if (!data || data === "[DONE]") continue;
       const event = JSON.parse(data) as {
-        choices?: { delta?: { content?: string } }[];
+        choices?: { delta?: { content?: string; reasoning_content?: string; tool_calls?: ({ index: number; id?: string; function?: { name?: string; arguments?: string } })[] } }[];
         error?: { message?: string };
       };
       if (event.error) throw new ApiError(event.error.message ?? "Generation failed", 502);
       const piece = event.choices?.[0]?.delta?.content ?? "";
+      const thought = event.choices?.[0]?.delta?.reasoning_content ?? "";
+      for (const delta of event.choices?.[0]?.delta?.tool_calls ?? []) {
+        toolCalls[delta.index] ??= { id: delta.id ?? "", type: "function", function: { name: "", arguments: "" } };
+        const call = toolCalls[delta.index]; if (delta.id) call.id = delta.id; call.function.name += delta.function?.name ?? ""; call.function.arguments += delta.function?.arguments ?? "";
+      }
       text += piece;
-      onToken(piece);
+      reasoning += thought;
+      if (thought) onToken(thought, "reasoning");
+      if (piece) onToken(piece, "content");
     }
     if (done) break;
   }
-  return { text, requestID };
+  return { text, reasoning, toolCalls: toolCalls.filter(Boolean), requestID };
 }

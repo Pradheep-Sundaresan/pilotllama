@@ -19,12 +19,32 @@ import (
 
 type Config struct {
 	Executable, Model, ModelID, StateDir, Batching string
+	ContextTokens, MaxOutputTokens                 uint32
 	StartupTimeout, ShutdownTimeout                time.Duration
+	QualifyContinuous                              bool
+}
+
+func (c Config) budgets() (uint32, uint32) {
+	contextTokens, maxOutputTokens := c.ContextTokens, c.MaxOutputTokens
+	if contextTokens == 0 {
+		contextTokens = 4096
+	}
+	if maxOutputTokens == 0 {
+		maxOutputTokens = 512
+	}
+	return contextTokens, maxOutputTokens
 }
 
 func (c Config) Validate() error {
 	if c.Batching != "" && c.Batching != "queue" && c.Batching != "continuous" {
 		return errors.New("backend batching must be queue or continuous")
+	}
+	contextTokens, maxOutputTokens := c.budgets()
+	if contextTokens < 32 || contextTokens > 1048576 || maxOutputTokens > contextTokens {
+		return errors.New("backend context must be 32..1048576 tokens and output must fit inside it")
+	}
+	if c.Batching == "continuous" && (contextTokens < 64 || maxOutputTokens > contextTokens/2) {
+		return errors.New("continuous output budget must fit each half of the shared context")
 	}
 	for _, path := range []string{c.Executable, c.Model} {
 		if !filepath.IsAbs(path) {
@@ -89,10 +109,16 @@ func run(ctx context.Context, c Config, serve func(context.Context, string) erro
 	}
 	defer os.RemoveAll(dir)
 	readyFile := filepath.Join(dir, "ready")
+	contextTokens, maxOutputTokens := c.budgets()
 	cmd := command(c.Executable, "--model", c.Model, "--model-id", c.ModelID,
-		"--listen", "127.0.0.1:0", "--ready-file", readyFile)
+		"--listen", "127.0.0.1:0", "--ready-file", readyFile,
+		"--context-tokens", strconv.FormatUint(uint64(contextTokens), 10),
+		"--max-output-tokens", strconv.FormatUint(uint64(maxOutputTokens), 10))
 	if c.Batching == "continuous" {
 		cmd.Args = append(cmd.Args, "--batching", "continuous")
+		if c.QualifyContinuous {
+			cmd.Args = append(cmd.Args, "--qualify-continuous", "true")
+		}
 	}
 	// Keep terminal signals from bypassing Go's HTTP-before-native shutdown order.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

@@ -21,7 +21,7 @@ type Page = "console" | "playground" | "experiments";
 
 const initialSnapshot: ApiSnapshot = {
   health: null, ready: null, backend: null, admission: null, metrics: null,
-  history: null, scheduler: null, memory: null, models: [], modelConfig: null, error: null, refreshedAt: null
+  history: null, scheduler: null, memory: null, models: [], modelConfig: null, modelCapabilities: null, error: null, refreshedAt: null
 };
 
 const navigation: { id: Page; label: string; icon: typeof ChartNoAxesCombined }[] = [

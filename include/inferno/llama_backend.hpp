@@ -9,9 +9,11 @@ namespace inferno {
 struct LlamaModelConfig {
     std::string path;
     std::uint32_t context_tokens = 4096;
+    std::uint32_t max_output_tokens = 512;
     std::uint32_t batch_tokens = 128;
     std::int32_t threads = 4;
     std::int32_t gpu_layers = 99;
+    bool allow_unqualified_continuous = false;
 };
 
 // One native backend per process in this milestone; call generate only serially.

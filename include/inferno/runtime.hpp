@@ -44,6 +44,7 @@ public:
     [[nodiscard]] virtual Submission submit(GenerationRequest request, InferenceBackend::TokenCallback token = {}) = 0;
     [[nodiscard]] virtual SchedulerSnapshot scheduler_snapshot() const = 0;
     [[nodiscard]] virtual std::optional<MemorySnapshot> memory_snapshot() const = 0;
+    [[nodiscard]] virtual std::optional<ModelCapabilities> model_capabilities() const { return std::nullopt; }
     virtual void shutdown() = 0;
 };
 
@@ -62,6 +63,7 @@ public:
     [[nodiscard]] Submission submit(GenerationRequest request, InferenceBackend::TokenCallback token = {}) override;
     [[nodiscard]] SchedulerSnapshot scheduler_snapshot() const override;
     [[nodiscard]] std::optional<MemorySnapshot> memory_snapshot() const override;
+    [[nodiscard]] std::optional<ModelCapabilities> model_capabilities() const override;
     void shutdown() override;
 
 private:

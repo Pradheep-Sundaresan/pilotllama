@@ -32,23 +32,68 @@ public:
         result.configured_gpu_layers = 0;
         return result;
     }
+    std::optional<inferno::ModelCapabilities> model_capabilities() const override {
+        inferno::ModelCapabilities result;
+        result.architecture = "fixture";
+        result.parameter_count = 1;
+        result.trained_context_tokens = 4096;
+        result.configured_context_tokens = 4096;
+        result.configured_max_output_tokens = 512;
+        result.has_decoder = true;
+        result.has_embedded_chat_template = true;
+        result.queue_mode = inferno::CapabilitySupport::verified;
+        result.continuous_mode = inferno::CapabilitySupport::unavailable;
+        result.system_messages = inferno::CapabilitySupport::detected;
+        result.multi_turn = inferno::CapabilitySupport::detected;
+        result.thinking = inferno::CapabilitySupport::verified;
+        return result;
+    }
     void generate(const inferno::GenerationRequest& request, const DecodeStarted& decode,
                   const TokenCallback& token, const Checkpoint& checkpoint) override {
         checkpoint(); decode();
-        if (request.prompt == "gate") {
+        const auto& prompt = request.messages.empty() ? request.prompt : request.messages.back().content;
+        if (prompt == "reasoning" && request.enable_thinking) {
+            token({"because", inferno::OutputChannel::reasoning});
+            if (request.max_output_tokens > 1) token({"answer", inferno::OutputChannel::content});
+        } else if (prompt == "sampling") {
+            if (request.temperature != 0.7F || request.top_p != 0.8F || request.top_k != 40 ||
+                request.seed != 42 || request.stop != std::vector<std::string>{"END", "###"})
+                throw std::runtime_error("sampling controls not preserved");
+            token("sampling-ok");
+        } else if (prompt == "tools") {
+            if (request.tool_choice != inferno::ToolChoice::required || request.tools.size() != 1 ||
+                request.tools[0].name != "weather" || request.tools[0].description != "Read weather" ||
+                request.tools[0].parameters_json != R"({"type":"object"})")
+                throw std::runtime_error("tool contract not preserved");
+            token("tools-ok");
+        } else if (prompt == "tool-call") {
+            if (request.tool_choice != inferno::ToolChoice::required || request.tools.size() != 1 || request.tools[0].name != "weather")
+                throw std::runtime_error("tool-call request not preserved");
+            token({std::string{}, inferno::OutputChannel::content, true});
+            token({R"({"city":"Paris"})", inferno::OutputChannel::tool_call, false, 0, "call_weather", "weather"});
+		} else if (prompt == "sunny") {
+			if (request.messages.size() != 3 || request.messages[1].tool_calls.size() != 1 ||
+				request.messages[1].tool_calls[0].id != "call_weather" || request.messages[2].tool_call_id != "call_weather")
+				throw std::runtime_error("tool result history not preserved");
+			token("It is sunny");
+		} else if (prompt == "structured") {
+			if (request.response_format != inferno::ResponseFormat::json_schema || request.response_schema_json.find("answer") == std::string::npos)
+				throw std::runtime_error("structured response not preserved");
+			token(R"({"answer":4})");
+        } else if (prompt == "gate") {
             token("G"); gate_.wait(); checkpoint();
             if (request.max_output_tokens > 1) token("done");
-        } else if (request.prompt == "failure") {
+        } else if (prompt == "failure") {
             throw std::runtime_error("private backend path /secret/model");
-        } else if (request.prompt == "partial-failure") {
+        } else if (prompt == "partial-failure") {
             token("partial");
             throw std::runtime_error("private backend path /secret/model");
-        } else if (request.prompt == "oversize") {
+        } else if (prompt == "oversize") {
             token(std::string(65537, 'x'));
-        } else if (request.prompt == "flood") {
+        } else if (prompt == "flood") {
             const std::string piece(65536, 'x');
             for (std::uint32_t i = 0; i < request.max_output_tokens; ++i) { checkpoint(); token(piece); }
-        } else if (request.prompt != "empty") {
+        } else if (prompt != "empty") {
             const std::string pieces[] = {std::string("\xf0\x9f", 2), std::string("\x98\x80", 2), "", "!"};
             for (std::uint32_t i = 0; i < 4 && i < request.max_output_tokens; ++i) { checkpoint(); token(pieces[i]); }
         }

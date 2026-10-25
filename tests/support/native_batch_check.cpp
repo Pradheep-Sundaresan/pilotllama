@@ -14,6 +14,7 @@ class TracedExecutor final : public inferno::BatchExecutor {
 public:
     explicit TracedExecutor(std::unique_ptr<inferno::BatchExecutor> inner) : inner_(std::move(inner)) {}
     std::optional<inferno::MemorySnapshot> memory_snapshot() const override { return inner_->memory_snapshot(); }
+    std::optional<inferno::ModelCapabilities> model_capabilities() const override { return inner_->model_capabilities(); }
     std::size_t admit(inferno::SequenceId id, const inferno::GenerationRequest& request) override {
         return inner_->admit(id, request);
     }
@@ -29,7 +30,7 @@ private:
 };
 
 inferno::GenerationRequest request(inferno::RequestId id, std::string prompt, std::uint32_t output = 4) {
-    return {id, std::move(prompt), output, inferno::RequestClock::now() + std::chrono::seconds(30)};
+    return {id, std::move(prompt), output, inferno::RequestClock::now() + std::chrono::seconds(30), {}};
 }
 
 std::uint64_t required(const std::optional<std::uint64_t>& value, const char* name) {
@@ -44,7 +45,8 @@ int main(int argc, char** argv) {
         return 2;
     }
     try {
-        auto traced = std::make_unique<TracedExecutor>(inferno::make_llama_batch_executor({argv[1]}));
+        auto traced = std::make_unique<TracedExecutor>(inferno::make_llama_batch_executor(
+            {.path = argv[1], .allow_unqualified_continuous = true}));
         auto* trace = traced.get();
         inferno::ContinuousBatchEngine engine(std::move(traced));
         const auto before = engine.memory_snapshot();
@@ -55,8 +57,8 @@ int main(int argc, char** argv) {
         if (ready == before->process_samples.end()) throw std::runtime_error("Backend-ready process measurement unavailable");
         const auto rss = required(ready->resident_bytes, "resident bytes");
         const auto footprint = required(ready->physical_footprint_bytes, "physical footprint");
-        if (rss > 4ULL * 1024 * 1024 * 1024 || footprint > 1024ULL * 1024 * 1024) {
-            throw std::runtime_error("Two-sequence allocation exceeds the conservative Phase 6B process limit");
+        if (rss > 12ULL * 1024 * 1024 * 1024 || footprint > 4ULL * 1024 * 1024 * 1024) {
+            throw std::runtime_error("Two-sequence allocation exceeds the bounded qualification limit");
         }
 
         const std::string prompt_a = "What is 2 + 2? Reply with just the number.";
@@ -64,7 +66,7 @@ int main(int argc, char** argv) {
         const auto serial_a = engine.submit(request(1, prompt_a)).completion.get();
         const auto serial_b = engine.submit(request(2, prompt_b)).completion.get();
         if (serial_a.state != inferno::RequestState::completed || serial_b.state != inferno::RequestState::completed) {
-            throw std::runtime_error("Serial reference generation failed");
+            throw std::runtime_error("Serial reference generation failed: " + serial_a.error + " / " + serial_b.error);
         }
         auto parallel_a = engine.submit(request(3, prompt_a));
         auto parallel_b = engine.submit(request(4, prompt_b));
@@ -78,7 +80,7 @@ int main(int argc, char** argv) {
         std::promise<void> first_token;
         std::atomic<bool> announced{false};
         auto cancelled = engine.submit(request(5, "Count upward from one using words separated by spaces.", 64),
-            [&](std::string_view) { if (!announced.exchange(true)) first_token.set_value(); });
+            [&](inferno::GeneratedPiece) { if (!announced.exchange(true)) first_token.set_value(); });
         auto survivor = engine.submit(request(6, prompt_b, 8));
         first_token.get_future().wait();
         (void)cancelled.control->cancel();

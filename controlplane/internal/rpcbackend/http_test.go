@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -120,6 +121,162 @@ func TestIntegrationPublicHTTPAuth(t *testing.T) {
 	}
 	if metricsResponse.StatusCode != 200 || metrics.Samples != 2 || metrics.Completed != 2 || metrics.Failed != 0 || metrics.Tokens != 8 || metrics.Duration <= 0 || metrics.Rate == nil || metrics.Latency.Samples != 2 || metrics.Latency.P95 != nil {
 		t.Fatalf("invalid live metrics: %+v", metrics)
+	}
+}
+
+func TestIntegrationPublicHTTPStructuredConversation(t *testing.T) {
+	f := startFixture(t, false)
+	s, err := service.New(service.Config{Listen: "127.0.0.1:8080", BackendGRPC: f.target})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	h := httptest.NewServer(s.Handler())
+	defer h.Close()
+
+	data := `{"model":"model-free-test-fixture","messages":[{"role":"system","content":"Answer briefly."},{"role":"user","content":"First turn."},{"role":"assistant","content":"Acknowledged."},{"role":"user","content":"tokens"}],"max_tokens":4}`
+	r, err := http.NewRequestWithContext(contextFor(t, 5*time.Second), "POST", h.URL+"/v1/chat/completions", strings.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkChat(t, response, "😀!", false)
+}
+
+func TestIntegrationPublicHTTPReasoningChannels(t *testing.T) {
+	f := startFixture(t, false)
+	s, err := service.New(service.Config{Listen: "127.0.0.1:8080", BackendGRPC: f.target})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	h := httptest.NewServer(s.Handler())
+	defer h.Close()
+	for _, stream := range []bool{false, true} {
+		data := strings.NewReader(`{"model":"model-free-test-fixture","messages":[{"role":"user","content":"reasoning"}],"max_tokens":2,"thinking":true,"stream":` + strconv.FormatBool(stream) + `}`)
+		r, err := http.NewRequestWithContext(contextFor(t, 5*time.Second), "POST", h.URL+"/v1/chat/completions", data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Header.Set("Content-Type", "application/json")
+		response, err := http.DefaultClient.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, readErr := io.ReadAll(response.Body)
+		response.Body.Close()
+		if readErr != nil || response.StatusCode != 200 || !bytes.Contains(body, []byte(`"reasoning_content":"because"`)) || !bytes.Contains(body, []byte(`"content":"answer"`)) || (stream && !bytes.Contains(body, []byte("[DONE]"))) {
+			t.Fatalf("stream=%v status=%d body=%s err=%v", stream, response.StatusCode, body, readErr)
+		}
+	}
+}
+
+func TestIntegrationPublicHTTPSamplingControls(t *testing.T) {
+	f := startFixture(t, false)
+	s, err := service.New(service.Config{Listen: "127.0.0.1:8080", BackendGRPC: f.target})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	h := httptest.NewServer(s.Handler())
+	defer h.Close()
+	data := `{"model":"model-free-test-fixture","messages":[{"role":"user","content":"sampling"}],"max_tokens":4,"temperature":0.7,"top_p":0.8,"top_k":40,"seed":42,"stop":["END","###"]}`
+	r, err := http.NewRequestWithContext(contextFor(t, 5*time.Second), "POST", h.URL+"/v1/chat/completions", strings.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkChat(t, response, "sampling-ok", false)
+}
+
+func TestIntegrationPublicHTTPToolContract(t *testing.T) {
+	f := startFixture(t, false)
+	s, err := service.New(service.Config{Listen: "127.0.0.1:8080", BackendGRPC: f.target})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	h := httptest.NewServer(s.Handler())
+	defer h.Close()
+	data := `{"model":"model-free-test-fixture","messages":[{"role":"user","content":"tools"}],"max_tokens":4,"tools":[{"type":"function","function":{"name":"weather","description":"Read weather","parameters":{"type":"object"}}}],"tool_choice":"required"}`
+	r, err := http.NewRequestWithContext(contextFor(t, 5*time.Second), "POST", h.URL+"/v1/chat/completions", strings.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkChat(t, response, "tools-ok", false)
+}
+
+func TestIntegrationPublicHTTPToolCallOutput(t *testing.T) {
+	f := startFixture(t, false)
+	s, err := service.New(service.Config{Listen: "127.0.0.1:8080", BackendGRPC: f.target})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	h := httptest.NewServer(s.Handler())
+	defer h.Close()
+	for _, stream := range []bool{false, true} {
+		data := `{"model":"model-free-test-fixture","messages":[{"role":"user","content":"tool-call"}],"max_tokens":4,"tools":[{"type":"function","function":{"name":"weather","parameters":{"type":"object"}}}],"tool_choice":"required","stream":` + strconv.FormatBool(stream) + `}`
+		r, err := http.NewRequestWithContext(contextFor(t, 5*time.Second), "POST", h.URL+"/v1/chat/completions", strings.NewReader(data))
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Header.Set("Content-Type", "application/json")
+		response, err := http.DefaultClient.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, readErr := io.ReadAll(response.Body)
+		response.Body.Close()
+		if readErr != nil || response.StatusCode != 200 || !bytes.Contains(body, []byte(`"id":"call_weather"`)) ||
+			!bytes.Contains(body, []byte(`"name":"weather"`)) || !bytes.Contains(body, []byte(`\"city\":\"Paris\"`)) ||
+			!bytes.Contains(body, []byte(`"finish_reason":"tool_calls"`)) || (stream && !bytes.Contains(body, []byte("[DONE]"))) {
+			t.Fatalf("stream=%v status=%d body=%s err=%v", stream, response.StatusCode, body, readErr)
+		}
+	}
+}
+
+func TestIntegrationPublicHTTPToolResultAndStructuredOutput(t *testing.T) {
+	f := startFixture(t, false)
+	s, err := service.New(service.Config{Listen: "127.0.0.1:8080", BackendGRPC: f.target})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	h := httptest.NewServer(s.Handler())
+	defer h.Close()
+	requests := []struct{ data, want string }{
+		{`{"model":"model-free-test-fixture","messages":[{"role":"user","content":"weather"},{"role":"assistant","content":"","tool_calls":[{"id":"call_weather","type":"function","function":{"name":"weather","arguments":"{\"city\":\"Paris\"}"}}]},{"role":"tool","tool_call_id":"call_weather","content":"sunny"}],"max_tokens":8}`, "It is sunny"},
+		{`{"model":"model-free-test-fixture","messages":[{"role":"user","content":"structured"}],"max_tokens":8,"response_format":{"type":"json_schema","json_schema":{"name":"answer","strict":true,"schema":{"type":"object","properties":{"answer":{"type":"integer"}},"required":["answer"]}}}}`, `\"answer\":4`},
+	}
+	for _, tc := range requests {
+		r, err := http.NewRequestWithContext(contextFor(t, 5*time.Second), "POST", h.URL+"/v1/chat/completions", strings.NewReader(tc.data))
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Header.Set("Content-Type", "application/json")
+		response, err := http.DefaultClient.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, readErr := io.ReadAll(response.Body)
+		response.Body.Close()
+		if readErr != nil || response.StatusCode != 200 || !bytes.Contains(body, []byte(tc.want)) {
+			t.Fatalf("status=%d body=%s err=%v", response.StatusCode, body, readErr)
+		}
 	}
 }
 

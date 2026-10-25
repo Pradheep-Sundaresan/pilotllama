@@ -21,6 +21,159 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type CompatibilityLevel int32
+
+const (
+	CompatibilityLevel_COMPATIBILITY_LEVEL_UNSPECIFIED CompatibilityLevel = 0
+	CompatibilityLevel_COMPATIBILITY_LEVEL_COMPATIBLE  CompatibilityLevel = 1
+	CompatibilityLevel_COMPATIBILITY_LEVEL_VERIFIED    CompatibilityLevel = 2
+)
+
+// Enum value maps for CompatibilityLevel.
+var (
+	CompatibilityLevel_name = map[int32]string{
+		0: "COMPATIBILITY_LEVEL_UNSPECIFIED",
+		1: "COMPATIBILITY_LEVEL_COMPATIBLE",
+		2: "COMPATIBILITY_LEVEL_VERIFIED",
+	}
+	CompatibilityLevel_value = map[string]int32{
+		"COMPATIBILITY_LEVEL_UNSPECIFIED": 0,
+		"COMPATIBILITY_LEVEL_COMPATIBLE":  1,
+		"COMPATIBILITY_LEVEL_VERIFIED":    2,
+	}
+)
+
+func (x CompatibilityLevel) Enum() *CompatibilityLevel {
+	p := new(CompatibilityLevel)
+	*p = x
+	return p
+}
+
+func (x CompatibilityLevel) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (CompatibilityLevel) Descriptor() protoreflect.EnumDescriptor {
+	return file_inferno_v1_inference_proto_enumTypes[0].Descriptor()
+}
+
+func (CompatibilityLevel) Type() protoreflect.EnumType {
+	return &file_inferno_v1_inference_proto_enumTypes[0]
+}
+
+func (x CompatibilityLevel) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use CompatibilityLevel.Descriptor instead.
+func (CompatibilityLevel) EnumDescriptor() ([]byte, []int) {
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{0}
+}
+
+type PromptTemplateSource int32
+
+const (
+	PromptTemplateSource_PROMPT_TEMPLATE_SOURCE_UNSPECIFIED       PromptTemplateSource = 0
+	PromptTemplateSource_PROMPT_TEMPLATE_SOURCE_EMBEDDED          PromptTemplateSource = 1
+	PromptTemplateSource_PROMPT_TEMPLATE_SOURCE_VERIFIED_FALLBACK PromptTemplateSource = 2
+)
+
+// Enum value maps for PromptTemplateSource.
+var (
+	PromptTemplateSource_name = map[int32]string{
+		0: "PROMPT_TEMPLATE_SOURCE_UNSPECIFIED",
+		1: "PROMPT_TEMPLATE_SOURCE_EMBEDDED",
+		2: "PROMPT_TEMPLATE_SOURCE_VERIFIED_FALLBACK",
+	}
+	PromptTemplateSource_value = map[string]int32{
+		"PROMPT_TEMPLATE_SOURCE_UNSPECIFIED":       0,
+		"PROMPT_TEMPLATE_SOURCE_EMBEDDED":          1,
+		"PROMPT_TEMPLATE_SOURCE_VERIFIED_FALLBACK": 2,
+	}
+)
+
+func (x PromptTemplateSource) Enum() *PromptTemplateSource {
+	p := new(PromptTemplateSource)
+	*p = x
+	return p
+}
+
+func (x PromptTemplateSource) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (PromptTemplateSource) Descriptor() protoreflect.EnumDescriptor {
+	return file_inferno_v1_inference_proto_enumTypes[1].Descriptor()
+}
+
+func (PromptTemplateSource) Type() protoreflect.EnumType {
+	return &file_inferno_v1_inference_proto_enumTypes[1]
+}
+
+func (x PromptTemplateSource) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use PromptTemplateSource.Descriptor instead.
+func (PromptTemplateSource) EnumDescriptor() ([]byte, []int) {
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{1}
+}
+
+type CapabilitySupport int32
+
+const (
+	CapabilitySupport_CAPABILITY_SUPPORT_UNSPECIFIED CapabilitySupport = 0
+	CapabilitySupport_CAPABILITY_SUPPORT_UNAVAILABLE CapabilitySupport = 1
+	CapabilitySupport_CAPABILITY_SUPPORT_DETECTED    CapabilitySupport = 2
+	CapabilitySupport_CAPABILITY_SUPPORT_VERIFIED    CapabilitySupport = 3
+	CapabilitySupport_CAPABILITY_SUPPORT_UNQUALIFIED CapabilitySupport = 4
+)
+
+// Enum value maps for CapabilitySupport.
+var (
+	CapabilitySupport_name = map[int32]string{
+		0: "CAPABILITY_SUPPORT_UNSPECIFIED",
+		1: "CAPABILITY_SUPPORT_UNAVAILABLE",
+		2: "CAPABILITY_SUPPORT_DETECTED",
+		3: "CAPABILITY_SUPPORT_VERIFIED",
+		4: "CAPABILITY_SUPPORT_UNQUALIFIED",
+	}
+	CapabilitySupport_value = map[string]int32{
+		"CAPABILITY_SUPPORT_UNSPECIFIED": 0,
+		"CAPABILITY_SUPPORT_UNAVAILABLE": 1,
+		"CAPABILITY_SUPPORT_DETECTED":    2,
+		"CAPABILITY_SUPPORT_VERIFIED":    3,
+		"CAPABILITY_SUPPORT_UNQUALIFIED": 4,
+	}
+)
+
+func (x CapabilitySupport) Enum() *CapabilitySupport {
+	p := new(CapabilitySupport)
+	*p = x
+	return p
+}
+
+func (x CapabilitySupport) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (CapabilitySupport) Descriptor() protoreflect.EnumDescriptor {
+	return file_inferno_v1_inference_proto_enumTypes[2].Descriptor()
+}
+
+func (CapabilitySupport) Type() protoreflect.EnumType {
+	return &file_inferno_v1_inference_proto_enumTypes[2]
+}
+
+func (x CapabilitySupport) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use CapabilitySupport.Descriptor instead.
+func (CapabilitySupport) EnumDescriptor() ([]byte, []int) {
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{2}
+}
+
 type MemorySamplePoint int32
 
 const (
@@ -63,11 +216,11 @@ func (x MemorySamplePoint) String() string {
 }
 
 func (MemorySamplePoint) Descriptor() protoreflect.EnumDescriptor {
-	return file_inferno_v1_inference_proto_enumTypes[0].Descriptor()
+	return file_inferno_v1_inference_proto_enumTypes[3].Descriptor()
 }
 
 func (MemorySamplePoint) Type() protoreflect.EnumType {
-	return &file_inferno_v1_inference_proto_enumTypes[0]
+	return &file_inferno_v1_inference_proto_enumTypes[3]
 }
 
 func (x MemorySamplePoint) Number() protoreflect.EnumNumber {
@@ -76,7 +229,7 @@ func (x MemorySamplePoint) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use MemorySamplePoint.Descriptor instead.
 func (MemorySamplePoint) EnumDescriptor() ([]byte, []int) {
-	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{0}
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{3}
 }
 
 type MeasurementStatus int32
@@ -112,11 +265,11 @@ func (x MeasurementStatus) String() string {
 }
 
 func (MeasurementStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_inferno_v1_inference_proto_enumTypes[1].Descriptor()
+	return file_inferno_v1_inference_proto_enumTypes[4].Descriptor()
 }
 
 func (MeasurementStatus) Type() protoreflect.EnumType {
-	return &file_inferno_v1_inference_proto_enumTypes[1]
+	return &file_inferno_v1_inference_proto_enumTypes[4]
 }
 
 func (x MeasurementStatus) Number() protoreflect.EnumNumber {
@@ -125,7 +278,7 @@ func (x MeasurementStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use MeasurementStatus.Descriptor instead.
 func (MeasurementStatus) EnumDescriptor() ([]byte, []int) {
-	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{1}
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{4}
 }
 
 type BackendState int32
@@ -170,11 +323,11 @@ func (x BackendState) String() string {
 }
 
 func (BackendState) Descriptor() protoreflect.EnumDescriptor {
-	return file_inferno_v1_inference_proto_enumTypes[2].Descriptor()
+	return file_inferno_v1_inference_proto_enumTypes[5].Descriptor()
 }
 
 func (BackendState) Type() protoreflect.EnumType {
-	return &file_inferno_v1_inference_proto_enumTypes[2]
+	return &file_inferno_v1_inference_proto_enumTypes[5]
 }
 
 func (x BackendState) Number() protoreflect.EnumNumber {
@@ -183,7 +336,218 @@ func (x BackendState) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use BackendState.Descriptor instead.
 func (BackendState) EnumDescriptor() ([]byte, []int) {
-	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{2}
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{5}
+}
+
+type ToolChoice int32
+
+const (
+	ToolChoice_TOOL_CHOICE_UNSPECIFIED ToolChoice = 0
+	ToolChoice_TOOL_CHOICE_NONE        ToolChoice = 1
+	ToolChoice_TOOL_CHOICE_AUTO        ToolChoice = 2
+	ToolChoice_TOOL_CHOICE_REQUIRED    ToolChoice = 3
+)
+
+// Enum value maps for ToolChoice.
+var (
+	ToolChoice_name = map[int32]string{
+		0: "TOOL_CHOICE_UNSPECIFIED",
+		1: "TOOL_CHOICE_NONE",
+		2: "TOOL_CHOICE_AUTO",
+		3: "TOOL_CHOICE_REQUIRED",
+	}
+	ToolChoice_value = map[string]int32{
+		"TOOL_CHOICE_UNSPECIFIED": 0,
+		"TOOL_CHOICE_NONE":        1,
+		"TOOL_CHOICE_AUTO":        2,
+		"TOOL_CHOICE_REQUIRED":    3,
+	}
+)
+
+func (x ToolChoice) Enum() *ToolChoice {
+	p := new(ToolChoice)
+	*p = x
+	return p
+}
+
+func (x ToolChoice) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ToolChoice) Descriptor() protoreflect.EnumDescriptor {
+	return file_inferno_v1_inference_proto_enumTypes[6].Descriptor()
+}
+
+func (ToolChoice) Type() protoreflect.EnumType {
+	return &file_inferno_v1_inference_proto_enumTypes[6]
+}
+
+func (x ToolChoice) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ToolChoice.Descriptor instead.
+func (ToolChoice) EnumDescriptor() ([]byte, []int) {
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{6}
+}
+
+type ChatRole int32
+
+const (
+	ChatRole_CHAT_ROLE_UNSPECIFIED ChatRole = 0
+	ChatRole_CHAT_ROLE_SYSTEM      ChatRole = 1
+	ChatRole_CHAT_ROLE_USER        ChatRole = 2
+	ChatRole_CHAT_ROLE_ASSISTANT   ChatRole = 3
+	ChatRole_CHAT_ROLE_TOOL        ChatRole = 4
+)
+
+// Enum value maps for ChatRole.
+var (
+	ChatRole_name = map[int32]string{
+		0: "CHAT_ROLE_UNSPECIFIED",
+		1: "CHAT_ROLE_SYSTEM",
+		2: "CHAT_ROLE_USER",
+		3: "CHAT_ROLE_ASSISTANT",
+		4: "CHAT_ROLE_TOOL",
+	}
+	ChatRole_value = map[string]int32{
+		"CHAT_ROLE_UNSPECIFIED": 0,
+		"CHAT_ROLE_SYSTEM":      1,
+		"CHAT_ROLE_USER":        2,
+		"CHAT_ROLE_ASSISTANT":   3,
+		"CHAT_ROLE_TOOL":        4,
+	}
+)
+
+func (x ChatRole) Enum() *ChatRole {
+	p := new(ChatRole)
+	*p = x
+	return p
+}
+
+func (x ChatRole) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ChatRole) Descriptor() protoreflect.EnumDescriptor {
+	return file_inferno_v1_inference_proto_enumTypes[7].Descriptor()
+}
+
+func (ChatRole) Type() protoreflect.EnumType {
+	return &file_inferno_v1_inference_proto_enumTypes[7]
+}
+
+func (x ChatRole) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ChatRole.Descriptor instead.
+func (ChatRole) EnumDescriptor() ([]byte, []int) {
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{7}
+}
+
+type ResponseFormat int32
+
+const (
+	ResponseFormat_RESPONSE_FORMAT_UNSPECIFIED ResponseFormat = 0
+	ResponseFormat_RESPONSE_FORMAT_TEXT        ResponseFormat = 1
+	ResponseFormat_RESPONSE_FORMAT_JSON_OBJECT ResponseFormat = 2
+	ResponseFormat_RESPONSE_FORMAT_JSON_SCHEMA ResponseFormat = 3
+)
+
+// Enum value maps for ResponseFormat.
+var (
+	ResponseFormat_name = map[int32]string{
+		0: "RESPONSE_FORMAT_UNSPECIFIED",
+		1: "RESPONSE_FORMAT_TEXT",
+		2: "RESPONSE_FORMAT_JSON_OBJECT",
+		3: "RESPONSE_FORMAT_JSON_SCHEMA",
+	}
+	ResponseFormat_value = map[string]int32{
+		"RESPONSE_FORMAT_UNSPECIFIED": 0,
+		"RESPONSE_FORMAT_TEXT":        1,
+		"RESPONSE_FORMAT_JSON_OBJECT": 2,
+		"RESPONSE_FORMAT_JSON_SCHEMA": 3,
+	}
+)
+
+func (x ResponseFormat) Enum() *ResponseFormat {
+	p := new(ResponseFormat)
+	*p = x
+	return p
+}
+
+func (x ResponseFormat) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ResponseFormat) Descriptor() protoreflect.EnumDescriptor {
+	return file_inferno_v1_inference_proto_enumTypes[8].Descriptor()
+}
+
+func (ResponseFormat) Type() protoreflect.EnumType {
+	return &file_inferno_v1_inference_proto_enumTypes[8]
+}
+
+func (x ResponseFormat) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ResponseFormat.Descriptor instead.
+func (ResponseFormat) EnumDescriptor() ([]byte, []int) {
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{8}
+}
+
+type TokenChannel int32
+
+const (
+	TokenChannel_TOKEN_CHANNEL_UNSPECIFIED TokenChannel = 0
+	TokenChannel_TOKEN_CHANNEL_CONTENT     TokenChannel = 1
+	TokenChannel_TOKEN_CHANNEL_REASONING   TokenChannel = 2
+	TokenChannel_TOKEN_CHANNEL_TOOL_CALL   TokenChannel = 3
+)
+
+// Enum value maps for TokenChannel.
+var (
+	TokenChannel_name = map[int32]string{
+		0: "TOKEN_CHANNEL_UNSPECIFIED",
+		1: "TOKEN_CHANNEL_CONTENT",
+		2: "TOKEN_CHANNEL_REASONING",
+		3: "TOKEN_CHANNEL_TOOL_CALL",
+	}
+	TokenChannel_value = map[string]int32{
+		"TOKEN_CHANNEL_UNSPECIFIED": 0,
+		"TOKEN_CHANNEL_CONTENT":     1,
+		"TOKEN_CHANNEL_REASONING":   2,
+		"TOKEN_CHANNEL_TOOL_CALL":   3,
+	}
+)
+
+func (x TokenChannel) Enum() *TokenChannel {
+	p := new(TokenChannel)
+	*p = x
+	return p
+}
+
+func (x TokenChannel) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (TokenChannel) Descriptor() protoreflect.EnumDescriptor {
+	return file_inferno_v1_inference_proto_enumTypes[9].Descriptor()
+}
+
+func (TokenChannel) Type() protoreflect.EnumType {
+	return &file_inferno_v1_inference_proto_enumTypes[9]
+}
+
+func (x TokenChannel) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use TokenChannel.Descriptor instead.
+func (TokenChannel) EnumDescriptor() ([]byte, []int) {
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{9}
 }
 
 type TerminalState int32
@@ -225,11 +589,11 @@ func (x TerminalState) String() string {
 }
 
 func (TerminalState) Descriptor() protoreflect.EnumDescriptor {
-	return file_inferno_v1_inference_proto_enumTypes[3].Descriptor()
+	return file_inferno_v1_inference_proto_enumTypes[10].Descriptor()
 }
 
 func (TerminalState) Type() protoreflect.EnumType {
-	return &file_inferno_v1_inference_proto_enumTypes[3]
+	return &file_inferno_v1_inference_proto_enumTypes[10]
 }
 
 func (x TerminalState) Number() protoreflect.EnumNumber {
@@ -238,7 +602,7 @@ func (x TerminalState) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use TerminalState.Descriptor instead.
 func (TerminalState) EnumDescriptor() ([]byte, []int) {
-	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{3}
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{10}
 }
 
 type ErrorCode int32
@@ -292,11 +656,11 @@ func (x ErrorCode) String() string {
 }
 
 func (ErrorCode) Descriptor() protoreflect.EnumDescriptor {
-	return file_inferno_v1_inference_proto_enumTypes[4].Descriptor()
+	return file_inferno_v1_inference_proto_enumTypes[11].Descriptor()
 }
 
 func (ErrorCode) Type() protoreflect.EnumType {
-	return &file_inferno_v1_inference_proto_enumTypes[4]
+	return &file_inferno_v1_inference_proto_enumTypes[11]
 }
 
 func (x ErrorCode) Number() protoreflect.EnumNumber {
@@ -305,7 +669,7 @@ func (x ErrorCode) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ErrorCode.Descriptor instead.
 func (ErrorCode) EnumDescriptor() ([]byte, []int) {
-	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{4}
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{11}
 }
 
 type CancelDisposition int32
@@ -344,11 +708,11 @@ func (x CancelDisposition) String() string {
 }
 
 func (CancelDisposition) Descriptor() protoreflect.EnumDescriptor {
-	return file_inferno_v1_inference_proto_enumTypes[5].Descriptor()
+	return file_inferno_v1_inference_proto_enumTypes[12].Descriptor()
 }
 
 func (CancelDisposition) Type() protoreflect.EnumType {
-	return &file_inferno_v1_inference_proto_enumTypes[5]
+	return &file_inferno_v1_inference_proto_enumTypes[12]
 }
 
 func (x CancelDisposition) Number() protoreflect.EnumNumber {
@@ -357,7 +721,7 @@ func (x CancelDisposition) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use CancelDisposition.Descriptor instead.
 func (CancelDisposition) EnumDescriptor() ([]byte, []int) {
-	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{5}
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{12}
 }
 
 type GetStatusRequest struct {
@@ -404,9 +768,11 @@ type GetStatusResponse struct {
 	// Point-in-time C++ runtime occupancy; request counts, not payload bytes.
 	Scheduler *SchedulerSnapshot `protobuf:"bytes,3,opt,name=scheduler,proto3" json:"scheduler,omitempty"`
 	// Bounded process snapshots plus llama.cpp allocation accounting.
-	Memory        *MemorySnapshot `protobuf:"bytes,4,opt,name=memory,proto3,oneof" json:"memory,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Memory *MemorySnapshot `protobuf:"bytes,4,opt,name=memory,proto3,oneof" json:"memory,omitempty"`
+	// Load-time GGUF metadata and bounded template probes. Detected is not verified.
+	ModelCapabilities *ModelCapabilities `protobuf:"bytes,5,opt,name=model_capabilities,json=modelCapabilities,proto3,oneof" json:"model_capabilities,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *GetStatusResponse) Reset() {
@@ -467,6 +833,178 @@ func (x *GetStatusResponse) GetMemory() *MemorySnapshot {
 	return nil
 }
 
+func (x *GetStatusResponse) GetModelCapabilities() *ModelCapabilities {
+	if x != nil {
+		return x.ModelCapabilities
+	}
+	return nil
+}
+
+type ModelCapabilities struct {
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	Architecture            string                 `protobuf:"bytes,1,opt,name=architecture,proto3" json:"architecture,omitempty"`
+	ParameterCount          uint64                 `protobuf:"varint,2,opt,name=parameter_count,json=parameterCount,proto3" json:"parameter_count,omitempty"`
+	TrainedContextTokens    uint32                 `protobuf:"varint,3,opt,name=trained_context_tokens,json=trainedContextTokens,proto3" json:"trained_context_tokens,omitempty"`
+	HasEncoder              bool                   `protobuf:"varint,4,opt,name=has_encoder,json=hasEncoder,proto3" json:"has_encoder,omitempty"`
+	HasDecoder              bool                   `protobuf:"varint,5,opt,name=has_decoder,json=hasDecoder,proto3" json:"has_decoder,omitempty"`
+	HasEmbeddedChatTemplate bool                   `protobuf:"varint,6,opt,name=has_embedded_chat_template,json=hasEmbeddedChatTemplate,proto3" json:"has_embedded_chat_template,omitempty"`
+	Compatibility           CompatibilityLevel     `protobuf:"varint,7,opt,name=compatibility,proto3,enum=inferno.v1.CompatibilityLevel" json:"compatibility,omitempty"`
+	TemplateSource          PromptTemplateSource   `protobuf:"varint,8,opt,name=template_source,json=templateSource,proto3,enum=inferno.v1.PromptTemplateSource" json:"template_source,omitempty"`
+	QueueMode               CapabilitySupport      `protobuf:"varint,9,opt,name=queue_mode,json=queueMode,proto3,enum=inferno.v1.CapabilitySupport" json:"queue_mode,omitempty"`
+	ContinuousMode          CapabilitySupport      `protobuf:"varint,10,opt,name=continuous_mode,json=continuousMode,proto3,enum=inferno.v1.CapabilitySupport" json:"continuous_mode,omitempty"`
+	SystemMessages          CapabilitySupport      `protobuf:"varint,11,opt,name=system_messages,json=systemMessages,proto3,enum=inferno.v1.CapabilitySupport" json:"system_messages,omitempty"`
+	MultiTurn               CapabilitySupport      `protobuf:"varint,12,opt,name=multi_turn,json=multiTurn,proto3,enum=inferno.v1.CapabilitySupport" json:"multi_turn,omitempty"`
+	Thinking                CapabilitySupport      `protobuf:"varint,13,opt,name=thinking,proto3,enum=inferno.v1.CapabilitySupport" json:"thinking,omitempty"`
+	Tools                   CapabilitySupport      `protobuf:"varint,14,opt,name=tools,proto3,enum=inferno.v1.CapabilitySupport" json:"tools,omitempty"`
+	// Operator-selected runtime budgets. These may be below the model maximum.
+	ConfiguredContextTokens   uint32 `protobuf:"varint,15,opt,name=configured_context_tokens,json=configuredContextTokens,proto3" json:"configured_context_tokens,omitempty"`
+	ConfiguredMaxOutputTokens uint32 `protobuf:"varint,16,opt,name=configured_max_output_tokens,json=configuredMaxOutputTokens,proto3" json:"configured_max_output_tokens,omitempty"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
+}
+
+func (x *ModelCapabilities) Reset() {
+	*x = ModelCapabilities{}
+	mi := &file_inferno_v1_inference_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelCapabilities) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelCapabilities) ProtoMessage() {}
+
+func (x *ModelCapabilities) ProtoReflect() protoreflect.Message {
+	mi := &file_inferno_v1_inference_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelCapabilities.ProtoReflect.Descriptor instead.
+func (*ModelCapabilities) Descriptor() ([]byte, []int) {
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ModelCapabilities) GetArchitecture() string {
+	if x != nil {
+		return x.Architecture
+	}
+	return ""
+}
+
+func (x *ModelCapabilities) GetParameterCount() uint64 {
+	if x != nil {
+		return x.ParameterCount
+	}
+	return 0
+}
+
+func (x *ModelCapabilities) GetTrainedContextTokens() uint32 {
+	if x != nil {
+		return x.TrainedContextTokens
+	}
+	return 0
+}
+
+func (x *ModelCapabilities) GetHasEncoder() bool {
+	if x != nil {
+		return x.HasEncoder
+	}
+	return false
+}
+
+func (x *ModelCapabilities) GetHasDecoder() bool {
+	if x != nil {
+		return x.HasDecoder
+	}
+	return false
+}
+
+func (x *ModelCapabilities) GetHasEmbeddedChatTemplate() bool {
+	if x != nil {
+		return x.HasEmbeddedChatTemplate
+	}
+	return false
+}
+
+func (x *ModelCapabilities) GetCompatibility() CompatibilityLevel {
+	if x != nil {
+		return x.Compatibility
+	}
+	return CompatibilityLevel_COMPATIBILITY_LEVEL_UNSPECIFIED
+}
+
+func (x *ModelCapabilities) GetTemplateSource() PromptTemplateSource {
+	if x != nil {
+		return x.TemplateSource
+	}
+	return PromptTemplateSource_PROMPT_TEMPLATE_SOURCE_UNSPECIFIED
+}
+
+func (x *ModelCapabilities) GetQueueMode() CapabilitySupport {
+	if x != nil {
+		return x.QueueMode
+	}
+	return CapabilitySupport_CAPABILITY_SUPPORT_UNSPECIFIED
+}
+
+func (x *ModelCapabilities) GetContinuousMode() CapabilitySupport {
+	if x != nil {
+		return x.ContinuousMode
+	}
+	return CapabilitySupport_CAPABILITY_SUPPORT_UNSPECIFIED
+}
+
+func (x *ModelCapabilities) GetSystemMessages() CapabilitySupport {
+	if x != nil {
+		return x.SystemMessages
+	}
+	return CapabilitySupport_CAPABILITY_SUPPORT_UNSPECIFIED
+}
+
+func (x *ModelCapabilities) GetMultiTurn() CapabilitySupport {
+	if x != nil {
+		return x.MultiTurn
+	}
+	return CapabilitySupport_CAPABILITY_SUPPORT_UNSPECIFIED
+}
+
+func (x *ModelCapabilities) GetThinking() CapabilitySupport {
+	if x != nil {
+		return x.Thinking
+	}
+	return CapabilitySupport_CAPABILITY_SUPPORT_UNSPECIFIED
+}
+
+func (x *ModelCapabilities) GetTools() CapabilitySupport {
+	if x != nil {
+		return x.Tools
+	}
+	return CapabilitySupport_CAPABILITY_SUPPORT_UNSPECIFIED
+}
+
+func (x *ModelCapabilities) GetConfiguredContextTokens() uint32 {
+	if x != nil {
+		return x.ConfiguredContextTokens
+	}
+	return 0
+}
+
+func (x *ModelCapabilities) GetConfiguredMaxOutputTokens() uint32 {
+	if x != nil {
+		return x.ConfiguredMaxOutputTokens
+	}
+	return 0
+}
+
 type SchedulerSnapshot struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Accepted requests not yet published as executing by the single worker.
@@ -481,7 +1019,7 @@ type SchedulerSnapshot struct {
 
 func (x *SchedulerSnapshot) Reset() {
 	*x = SchedulerSnapshot{}
-	mi := &file_inferno_v1_inference_proto_msgTypes[2]
+	mi := &file_inferno_v1_inference_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -493,7 +1031,7 @@ func (x *SchedulerSnapshot) String() string {
 func (*SchedulerSnapshot) ProtoMessage() {}
 
 func (x *SchedulerSnapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_inferno_v1_inference_proto_msgTypes[2]
+	mi := &file_inferno_v1_inference_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -506,7 +1044,7 @@ func (x *SchedulerSnapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SchedulerSnapshot.ProtoReflect.Descriptor instead.
 func (*SchedulerSnapshot) Descriptor() ([]byte, []int) {
-	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{2}
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *SchedulerSnapshot) GetWaitingRequests() uint32 {
@@ -550,7 +1088,7 @@ type MemorySnapshot struct {
 
 func (x *MemorySnapshot) Reset() {
 	*x = MemorySnapshot{}
-	mi := &file_inferno_v1_inference_proto_msgTypes[3]
+	mi := &file_inferno_v1_inference_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -562,7 +1100,7 @@ func (x *MemorySnapshot) String() string {
 func (*MemorySnapshot) ProtoMessage() {}
 
 func (x *MemorySnapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_inferno_v1_inference_proto_msgTypes[3]
+	mi := &file_inferno_v1_inference_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -575,7 +1113,7 @@ func (x *MemorySnapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MemorySnapshot.ProtoReflect.Descriptor instead.
 func (*MemorySnapshot) Descriptor() ([]byte, []int) {
-	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{3}
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *MemorySnapshot) GetProcessSamples() []*ProcessMemorySample {
@@ -664,7 +1202,7 @@ type ProcessMemorySample struct {
 
 func (x *ProcessMemorySample) Reset() {
 	*x = ProcessMemorySample{}
-	mi := &file_inferno_v1_inference_proto_msgTypes[4]
+	mi := &file_inferno_v1_inference_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -676,7 +1214,7 @@ func (x *ProcessMemorySample) String() string {
 func (*ProcessMemorySample) ProtoMessage() {}
 
 func (x *ProcessMemorySample) ProtoReflect() protoreflect.Message {
-	mi := &file_inferno_v1_inference_proto_msgTypes[4]
+	mi := &file_inferno_v1_inference_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -689,7 +1227,7 @@ func (x *ProcessMemorySample) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessMemorySample.ProtoReflect.Descriptor instead.
 func (*ProcessMemorySample) Descriptor() ([]byte, []int) {
-	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{4}
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ProcessMemorySample) GetPoint() MemorySamplePoint {
@@ -753,7 +1291,7 @@ type LlamaBufferAllocation struct {
 
 func (x *LlamaBufferAllocation) Reset() {
 	*x = LlamaBufferAllocation{}
-	mi := &file_inferno_v1_inference_proto_msgTypes[5]
+	mi := &file_inferno_v1_inference_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -765,7 +1303,7 @@ func (x *LlamaBufferAllocation) String() string {
 func (*LlamaBufferAllocation) ProtoMessage() {}
 
 func (x *LlamaBufferAllocation) ProtoReflect() protoreflect.Message {
-	mi := &file_inferno_v1_inference_proto_msgTypes[5]
+	mi := &file_inferno_v1_inference_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -778,7 +1316,7 @@ func (x *LlamaBufferAllocation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LlamaBufferAllocation.ProtoReflect.Descriptor instead.
 func (*LlamaBufferAllocation) Descriptor() ([]byte, []int) {
-	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{5}
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *LlamaBufferAllocation) GetName() string {
@@ -814,15 +1352,29 @@ type GenerateRequest struct {
 	// Nonzero and unique among active requests; public JSON renders it as a string.
 	RequestId uint64 `protobuf:"varint,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	Prompt    string `protobuf:"bytes,2,opt,name=prompt,proto3" json:"prompt,omitempty"`
-	// Explicit 1..512 for the current native adapter; zero is invalid.
+	// Explicit 1..configured_max_output_tokens; zero is invalid.
 	MaxOutputTokens uint32 `protobuf:"varint,3,opt,name=max_output_tokens,json=maxOutputTokens,proto3" json:"max_output_tokens,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Structured chat input. Public callers use this; prompt remains for bounded
+	// internal compatibility fixtures and exactly one form must be present.
+	Messages []*ChatMessage `protobuf:"bytes,4,rep,name=messages,proto3" json:"messages,omitempty"`
+	// Internal Phase 8D contract. Public exposure waits for native parser integration.
+	EnableThinking     bool              `protobuf:"varint,5,opt,name=enable_thinking,json=enableThinking,proto3" json:"enable_thinking,omitempty"`
+	Temperature        float32           `protobuf:"fixed32,6,opt,name=temperature,proto3" json:"temperature,omitempty"`
+	TopP               float32           `protobuf:"fixed32,7,opt,name=top_p,json=topP,proto3" json:"top_p,omitempty"`
+	TopK               int32             `protobuf:"varint,8,opt,name=top_k,json=topK,proto3" json:"top_k,omitempty"`
+	Seed               *uint32           `protobuf:"varint,9,opt,name=seed,proto3,oneof" json:"seed,omitempty"`
+	Stop               []string          `protobuf:"bytes,10,rep,name=stop,proto3" json:"stop,omitempty"`
+	Tools              []*ToolDefinition `protobuf:"bytes,11,rep,name=tools,proto3" json:"tools,omitempty"`
+	ToolChoice         ToolChoice        `protobuf:"varint,12,opt,name=tool_choice,json=toolChoice,proto3,enum=inferno.v1.ToolChoice" json:"tool_choice,omitempty"`
+	ResponseFormat     ResponseFormat    `protobuf:"varint,13,opt,name=response_format,json=responseFormat,proto3,enum=inferno.v1.ResponseFormat" json:"response_format,omitempty"`
+	ResponseSchemaJson string            `protobuf:"bytes,14,opt,name=response_schema_json,json=responseSchemaJson,proto3" json:"response_schema_json,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *GenerateRequest) Reset() {
 	*x = GenerateRequest{}
-	mi := &file_inferno_v1_inference_proto_msgTypes[6]
+	mi := &file_inferno_v1_inference_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -834,7 +1386,7 @@ func (x *GenerateRequest) String() string {
 func (*GenerateRequest) ProtoMessage() {}
 
 func (x *GenerateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_inferno_v1_inference_proto_msgTypes[6]
+	mi := &file_inferno_v1_inference_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -847,7 +1399,7 @@ func (x *GenerateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateRequest.ProtoReflect.Descriptor instead.
 func (*GenerateRequest) Descriptor() ([]byte, []int) {
-	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{6}
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *GenerateRequest) GetRequestId() uint64 {
@@ -871,6 +1423,271 @@ func (x *GenerateRequest) GetMaxOutputTokens() uint32 {
 	return 0
 }
 
+func (x *GenerateRequest) GetMessages() []*ChatMessage {
+	if x != nil {
+		return x.Messages
+	}
+	return nil
+}
+
+func (x *GenerateRequest) GetEnableThinking() bool {
+	if x != nil {
+		return x.EnableThinking
+	}
+	return false
+}
+
+func (x *GenerateRequest) GetTemperature() float32 {
+	if x != nil {
+		return x.Temperature
+	}
+	return 0
+}
+
+func (x *GenerateRequest) GetTopP() float32 {
+	if x != nil {
+		return x.TopP
+	}
+	return 0
+}
+
+func (x *GenerateRequest) GetTopK() int32 {
+	if x != nil {
+		return x.TopK
+	}
+	return 0
+}
+
+func (x *GenerateRequest) GetSeed() uint32 {
+	if x != nil && x.Seed != nil {
+		return *x.Seed
+	}
+	return 0
+}
+
+func (x *GenerateRequest) GetStop() []string {
+	if x != nil {
+		return x.Stop
+	}
+	return nil
+}
+
+func (x *GenerateRequest) GetTools() []*ToolDefinition {
+	if x != nil {
+		return x.Tools
+	}
+	return nil
+}
+
+func (x *GenerateRequest) GetToolChoice() ToolChoice {
+	if x != nil {
+		return x.ToolChoice
+	}
+	return ToolChoice_TOOL_CHOICE_UNSPECIFIED
+}
+
+func (x *GenerateRequest) GetResponseFormat() ResponseFormat {
+	if x != nil {
+		return x.ResponseFormat
+	}
+	return ResponseFormat_RESPONSE_FORMAT_UNSPECIFIED
+}
+
+func (x *GenerateRequest) GetResponseSchemaJson() string {
+	if x != nil {
+		return x.ResponseSchemaJson
+	}
+	return ""
+}
+
+type ToolDefinition struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Name           string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Description    string                 `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
+	ParametersJson string                 `protobuf:"bytes,3,opt,name=parameters_json,json=parametersJson,proto3" json:"parameters_json,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ToolDefinition) Reset() {
+	*x = ToolDefinition{}
+	mi := &file_inferno_v1_inference_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ToolDefinition) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ToolDefinition) ProtoMessage() {}
+
+func (x *ToolDefinition) ProtoReflect() protoreflect.Message {
+	mi := &file_inferno_v1_inference_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ToolDefinition.ProtoReflect.Descriptor instead.
+func (*ToolDefinition) Descriptor() ([]byte, []int) {
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *ToolDefinition) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ToolDefinition) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *ToolDefinition) GetParametersJson() string {
+	if x != nil {
+		return x.ParametersJson
+	}
+	return ""
+}
+
+type ChatMessage struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Role          ChatRole               `protobuf:"varint,1,opt,name=role,proto3,enum=inferno.v1.ChatRole" json:"role,omitempty"`
+	Content       string                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
+	ToolCalls     []*ToolCall            `protobuf:"bytes,3,rep,name=tool_calls,json=toolCalls,proto3" json:"tool_calls,omitempty"`
+	ToolCallId    string                 `protobuf:"bytes,4,opt,name=tool_call_id,json=toolCallId,proto3" json:"tool_call_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ChatMessage) Reset() {
+	*x = ChatMessage{}
+	mi := &file_inferno_v1_inference_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ChatMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ChatMessage) ProtoMessage() {}
+
+func (x *ChatMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_inferno_v1_inference_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ChatMessage.ProtoReflect.Descriptor instead.
+func (*ChatMessage) Descriptor() ([]byte, []int) {
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *ChatMessage) GetRole() ChatRole {
+	if x != nil {
+		return x.Role
+	}
+	return ChatRole_CHAT_ROLE_UNSPECIFIED
+}
+
+func (x *ChatMessage) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
+func (x *ChatMessage) GetToolCalls() []*ToolCall {
+	if x != nil {
+		return x.ToolCalls
+	}
+	return nil
+}
+
+func (x *ChatMessage) GetToolCallId() string {
+	if x != nil {
+		return x.ToolCallId
+	}
+	return ""
+}
+
+type ToolCall struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	ArgumentsJson string                 `protobuf:"bytes,3,opt,name=arguments_json,json=argumentsJson,proto3" json:"arguments_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ToolCall) Reset() {
+	*x = ToolCall{}
+	mi := &file_inferno_v1_inference_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ToolCall) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ToolCall) ProtoMessage() {}
+
+func (x *ToolCall) ProtoReflect() protoreflect.Message {
+	mi := &file_inferno_v1_inference_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ToolCall.ProtoReflect.Descriptor instead.
+func (*ToolCall) Descriptor() ([]byte, []int) {
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ToolCall) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *ToolCall) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ToolCall) GetArgumentsJson() string {
+	if x != nil {
+		return x.ArgumentsJson
+	}
+	return ""
+}
+
 type GenerateEvent struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	RequestId uint64                 `protobuf:"varint,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
@@ -889,7 +1706,7 @@ type GenerateEvent struct {
 
 func (x *GenerateEvent) Reset() {
 	*x = GenerateEvent{}
-	mi := &file_inferno_v1_inference_proto_msgTypes[7]
+	mi := &file_inferno_v1_inference_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -901,7 +1718,7 @@ func (x *GenerateEvent) String() string {
 func (*GenerateEvent) ProtoMessage() {}
 
 func (x *GenerateEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_inferno_v1_inference_proto_msgTypes[7]
+	mi := &file_inferno_v1_inference_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -914,7 +1731,7 @@ func (x *GenerateEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateEvent.ProtoReflect.Descriptor instead.
 func (*GenerateEvent) Descriptor() ([]byte, []int) {
-	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{7}
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *GenerateEvent) GetRequestId() uint64 {
@@ -988,7 +1805,7 @@ type Accepted struct {
 
 func (x *Accepted) Reset() {
 	*x = Accepted{}
-	mi := &file_inferno_v1_inference_proto_msgTypes[8]
+	mi := &file_inferno_v1_inference_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1000,7 +1817,7 @@ func (x *Accepted) String() string {
 func (*Accepted) ProtoMessage() {}
 
 func (x *Accepted) ProtoReflect() protoreflect.Message {
-	mi := &file_inferno_v1_inference_proto_msgTypes[8]
+	mi := &file_inferno_v1_inference_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1013,22 +1830,31 @@ func (x *Accepted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Accepted.ProtoReflect.Descriptor instead.
 func (*Accepted) Descriptor() ([]byte, []int) {
-	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{8}
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{12}
 }
 
 type Token struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// One raw native non-EOG piece. May be empty or split a UTF-8 code point.
+	// Parsed output bytes. May be empty or split a UTF-8 code point.
 	Piece []byte `protobuf:"bytes,1,opt,name=piece,proto3" json:"piece,omitempty"`
-	// Starts at 1, increases by exactly 1 per native token event, including empties.
-	OutputTokens  uint32 `protobuf:"varint,2,opt,name=output_tokens,json=outputTokens,proto3" json:"output_tokens,omitempty"`
+	// Cumulative native non-EOG token count. A parser flush may leave it unchanged.
+	OutputTokens uint32 `protobuf:"varint,2,opt,name=output_tokens,json=outputTokens,proto3" json:"output_tokens,omitempty"`
+	// Every event is explicitly classified; UNSPECIFIED is invalid on the wire.
+	Channel TokenChannel `protobuf:"varint,3,opt,name=channel,proto3,enum=inferno.v1.TokenChannel" json:"channel,omitempty"`
+	// True exactly once for each generated native non-EOG token. False events carry
+	// parser-buffered semantic output and must not change output_tokens.
+	AdvancesOutputTokens bool `protobuf:"varint,4,opt,name=advances_output_tokens,json=advancesOutputTokens,proto3" json:"advances_output_tokens,omitempty"`
+	// Present only for TOOL_CALL. piece contains the incremental arguments bytes.
+	ToolCallIndex *uint32 `protobuf:"varint,5,opt,name=tool_call_index,json=toolCallIndex,proto3,oneof" json:"tool_call_index,omitempty"`
+	ToolCallId    string  `protobuf:"bytes,6,opt,name=tool_call_id,json=toolCallId,proto3" json:"tool_call_id,omitempty"`
+	ToolName      string  `protobuf:"bytes,7,opt,name=tool_name,json=toolName,proto3" json:"tool_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Token) Reset() {
 	*x = Token{}
-	mi := &file_inferno_v1_inference_proto_msgTypes[9]
+	mi := &file_inferno_v1_inference_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1040,7 +1866,7 @@ func (x *Token) String() string {
 func (*Token) ProtoMessage() {}
 
 func (x *Token) ProtoReflect() protoreflect.Message {
-	mi := &file_inferno_v1_inference_proto_msgTypes[9]
+	mi := &file_inferno_v1_inference_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1053,7 +1879,7 @@ func (x *Token) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Token.ProtoReflect.Descriptor instead.
 func (*Token) Descriptor() ([]byte, []int) {
-	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{9}
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *Token) GetPiece() []byte {
@@ -1070,6 +1896,41 @@ func (x *Token) GetOutputTokens() uint32 {
 	return 0
 }
 
+func (x *Token) GetChannel() TokenChannel {
+	if x != nil {
+		return x.Channel
+	}
+	return TokenChannel_TOKEN_CHANNEL_UNSPECIFIED
+}
+
+func (x *Token) GetAdvancesOutputTokens() bool {
+	if x != nil {
+		return x.AdvancesOutputTokens
+	}
+	return false
+}
+
+func (x *Token) GetToolCallIndex() uint32 {
+	if x != nil && x.ToolCallIndex != nil {
+		return *x.ToolCallIndex
+	}
+	return 0
+}
+
+func (x *Token) GetToolCallId() string {
+	if x != nil {
+		return x.ToolCallId
+	}
+	return ""
+}
+
+func (x *Token) GetToolName() string {
+	if x != nil {
+		return x.ToolName
+	}
+	return ""
+}
+
 type Finished struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	State TerminalState          `protobuf:"varint,1,opt,name=state,proto3,enum=inferno.v1.TerminalState" json:"state,omitempty"`
@@ -1083,7 +1944,7 @@ type Finished struct {
 
 func (x *Finished) Reset() {
 	*x = Finished{}
-	mi := &file_inferno_v1_inference_proto_msgTypes[10]
+	mi := &file_inferno_v1_inference_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1095,7 +1956,7 @@ func (x *Finished) String() string {
 func (*Finished) ProtoMessage() {}
 
 func (x *Finished) ProtoReflect() protoreflect.Message {
-	mi := &file_inferno_v1_inference_proto_msgTypes[10]
+	mi := &file_inferno_v1_inference_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1108,7 +1969,7 @@ func (x *Finished) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Finished.ProtoReflect.Descriptor instead.
 func (*Finished) Descriptor() ([]byte, []int) {
-	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{10}
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *Finished) GetState() TerminalState {
@@ -1150,7 +2011,7 @@ type RequestMetrics struct {
 
 func (x *RequestMetrics) Reset() {
 	*x = RequestMetrics{}
-	mi := &file_inferno_v1_inference_proto_msgTypes[11]
+	mi := &file_inferno_v1_inference_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1162,7 +2023,7 @@ func (x *RequestMetrics) String() string {
 func (*RequestMetrics) ProtoMessage() {}
 
 func (x *RequestMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_inferno_v1_inference_proto_msgTypes[11]
+	mi := &file_inferno_v1_inference_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1175,7 +2036,7 @@ func (x *RequestMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RequestMetrics.ProtoReflect.Descriptor instead.
 func (*RequestMetrics) Descriptor() ([]byte, []int) {
-	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{11}
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *RequestMetrics) GetOutputTokens() uint32 {
@@ -1255,7 +2116,7 @@ type InferenceError struct {
 
 func (x *InferenceError) Reset() {
 	*x = InferenceError{}
-	mi := &file_inferno_v1_inference_proto_msgTypes[12]
+	mi := &file_inferno_v1_inference_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1267,7 +2128,7 @@ func (x *InferenceError) String() string {
 func (*InferenceError) ProtoMessage() {}
 
 func (x *InferenceError) ProtoReflect() protoreflect.Message {
-	mi := &file_inferno_v1_inference_proto_msgTypes[12]
+	mi := &file_inferno_v1_inference_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1280,7 +2141,7 @@ func (x *InferenceError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InferenceError.ProtoReflect.Descriptor instead.
 func (*InferenceError) Descriptor() ([]byte, []int) {
-	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{12}
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *InferenceError) GetRequestId() uint64 {
@@ -1313,7 +2174,7 @@ type CancelRequest struct {
 
 func (x *CancelRequest) Reset() {
 	*x = CancelRequest{}
-	mi := &file_inferno_v1_inference_proto_msgTypes[13]
+	mi := &file_inferno_v1_inference_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1325,7 +2186,7 @@ func (x *CancelRequest) String() string {
 func (*CancelRequest) ProtoMessage() {}
 
 func (x *CancelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_inferno_v1_inference_proto_msgTypes[13]
+	mi := &file_inferno_v1_inference_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1338,7 +2199,7 @@ func (x *CancelRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelRequest.ProtoReflect.Descriptor instead.
 func (*CancelRequest) Descriptor() ([]byte, []int) {
-	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{13}
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *CancelRequest) GetRequestId() uint64 {
@@ -1358,7 +2219,7 @@ type CancelResponse struct {
 
 func (x *CancelResponse) Reset() {
 	*x = CancelResponse{}
-	mi := &file_inferno_v1_inference_proto_msgTypes[14]
+	mi := &file_inferno_v1_inference_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1370,7 +2231,7 @@ func (x *CancelResponse) String() string {
 func (*CancelResponse) ProtoMessage() {}
 
 func (x *CancelResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_inferno_v1_inference_proto_msgTypes[14]
+	mi := &file_inferno_v1_inference_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1383,7 +2244,7 @@ func (x *CancelResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelResponse.ProtoReflect.Descriptor instead.
 func (*CancelResponse) Descriptor() ([]byte, []int) {
-	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{14}
+	return file_inferno_v1_inference_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *CancelResponse) GetRequestId() uint64 {
@@ -1406,14 +2267,38 @@ const file_inferno_v1_inference_proto_rawDesc = "" +
 	"\n" +
 	"\x1ainferno/v1/inference.proto\x12\n" +
 	"inferno.v1\"\x12\n" +
-	"\x10GetStatusRequest\"\xf1\x01\n" +
+	"\x10GetStatusRequest\"\xdb\x02\n" +
 	"\x11GetStatusResponse\x12.\n" +
 	"\x05state\x18\x01 \x01(\x0e2\x18.inferno.v1.BackendStateR\x05state\x12\x1e\n" +
 	"\bmodel_id\x18\x02 \x01(\tH\x00R\amodelId\x88\x01\x01\x12;\n" +
 	"\tscheduler\x18\x03 \x01(\v2\x1d.inferno.v1.SchedulerSnapshotR\tscheduler\x127\n" +
-	"\x06memory\x18\x04 \x01(\v2\x1a.inferno.v1.MemorySnapshotH\x01R\x06memory\x88\x01\x01B\v\n" +
+	"\x06memory\x18\x04 \x01(\v2\x1a.inferno.v1.MemorySnapshotH\x01R\x06memory\x88\x01\x01\x12Q\n" +
+	"\x12model_capabilities\x18\x05 \x01(\v2\x1d.inferno.v1.ModelCapabilitiesH\x02R\x11modelCapabilities\x88\x01\x01B\v\n" +
 	"\t_model_idB\t\n" +
-	"\a_memory\"\x94\x01\n" +
+	"\a_memoryB\x15\n" +
+	"\x13_model_capabilities\"\x9f\a\n" +
+	"\x11ModelCapabilities\x12\"\n" +
+	"\farchitecture\x18\x01 \x01(\tR\farchitecture\x12'\n" +
+	"\x0fparameter_count\x18\x02 \x01(\x04R\x0eparameterCount\x124\n" +
+	"\x16trained_context_tokens\x18\x03 \x01(\rR\x14trainedContextTokens\x12\x1f\n" +
+	"\vhas_encoder\x18\x04 \x01(\bR\n" +
+	"hasEncoder\x12\x1f\n" +
+	"\vhas_decoder\x18\x05 \x01(\bR\n" +
+	"hasDecoder\x12;\n" +
+	"\x1ahas_embedded_chat_template\x18\x06 \x01(\bR\x17hasEmbeddedChatTemplate\x12D\n" +
+	"\rcompatibility\x18\a \x01(\x0e2\x1e.inferno.v1.CompatibilityLevelR\rcompatibility\x12I\n" +
+	"\x0ftemplate_source\x18\b \x01(\x0e2 .inferno.v1.PromptTemplateSourceR\x0etemplateSource\x12<\n" +
+	"\n" +
+	"queue_mode\x18\t \x01(\x0e2\x1d.inferno.v1.CapabilitySupportR\tqueueMode\x12F\n" +
+	"\x0fcontinuous_mode\x18\n" +
+	" \x01(\x0e2\x1d.inferno.v1.CapabilitySupportR\x0econtinuousMode\x12F\n" +
+	"\x0fsystem_messages\x18\v \x01(\x0e2\x1d.inferno.v1.CapabilitySupportR\x0esystemMessages\x12<\n" +
+	"\n" +
+	"multi_turn\x18\f \x01(\x0e2\x1d.inferno.v1.CapabilitySupportR\tmultiTurn\x129\n" +
+	"\bthinking\x18\r \x01(\x0e2\x1d.inferno.v1.CapabilitySupportR\bthinking\x123\n" +
+	"\x05tools\x18\x0e \x01(\x0e2\x1d.inferno.v1.CapabilitySupportR\x05tools\x12:\n" +
+	"\x19configured_context_tokens\x18\x0f \x01(\rR\x17configuredContextTokens\x12?\n" +
+	"\x1cconfigured_max_output_tokens\x18\x10 \x01(\rR\x19configuredMaxOutputTokens\"\x94\x01\n" +
 	"\x11SchedulerSnapshot\x12)\n" +
 	"\x10waiting_requests\x18\x01 \x01(\rR\x0fwaitingRequests\x12-\n" +
 	"\x12executing_requests\x18\x02 \x01(\rR\x11executingRequests\x12%\n" +
@@ -1451,12 +2336,41 @@ const file_inferno_v1_inference_proto_rawDesc = "" +
 	"\vmodel_bytes\x18\x02 \x01(\x04R\n" +
 	"modelBytes\x12#\n" +
 	"\rcontext_bytes\x18\x03 \x01(\x04R\fcontextBytes\x12#\n" +
-	"\rcompute_bytes\x18\x04 \x01(\x04R\fcomputeBytes\"t\n" +
+	"\rcompute_bytes\x18\x04 \x01(\x04R\fcomputeBytes\"\xb6\x04\n" +
 	"\x0fGenerateRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\x04R\trequestId\x12\x16\n" +
 	"\x06prompt\x18\x02 \x01(\tR\x06prompt\x12*\n" +
-	"\x11max_output_tokens\x18\x03 \x01(\rR\x0fmaxOutputTokens\"\xcc\x01\n" +
+	"\x11max_output_tokens\x18\x03 \x01(\rR\x0fmaxOutputTokens\x123\n" +
+	"\bmessages\x18\x04 \x03(\v2\x17.inferno.v1.ChatMessageR\bmessages\x12'\n" +
+	"\x0fenable_thinking\x18\x05 \x01(\bR\x0eenableThinking\x12 \n" +
+	"\vtemperature\x18\x06 \x01(\x02R\vtemperature\x12\x13\n" +
+	"\x05top_p\x18\a \x01(\x02R\x04topP\x12\x13\n" +
+	"\x05top_k\x18\b \x01(\x05R\x04topK\x12\x17\n" +
+	"\x04seed\x18\t \x01(\rH\x00R\x04seed\x88\x01\x01\x12\x12\n" +
+	"\x04stop\x18\n" +
+	" \x03(\tR\x04stop\x120\n" +
+	"\x05tools\x18\v \x03(\v2\x1a.inferno.v1.ToolDefinitionR\x05tools\x127\n" +
+	"\vtool_choice\x18\f \x01(\x0e2\x16.inferno.v1.ToolChoiceR\n" +
+	"toolChoice\x12C\n" +
+	"\x0fresponse_format\x18\r \x01(\x0e2\x1a.inferno.v1.ResponseFormatR\x0eresponseFormat\x120\n" +
+	"\x14response_schema_json\x18\x0e \x01(\tR\x12responseSchemaJsonB\a\n" +
+	"\x05_seed\"o\n" +
+	"\x0eToolDefinition\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
+	"\vdescription\x18\x02 \x01(\tR\vdescription\x12'\n" +
+	"\x0fparameters_json\x18\x03 \x01(\tR\x0eparametersJson\"\xa8\x01\n" +
+	"\vChatMessage\x12(\n" +
+	"\x04role\x18\x01 \x01(\x0e2\x14.inferno.v1.ChatRoleR\x04role\x12\x18\n" +
+	"\acontent\x18\x02 \x01(\tR\acontent\x123\n" +
+	"\n" +
+	"tool_calls\x18\x03 \x03(\v2\x14.inferno.v1.ToolCallR\ttoolCalls\x12 \n" +
+	"\ftool_call_id\x18\x04 \x01(\tR\n" +
+	"toolCallId\"U\n" +
+	"\bToolCall\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12%\n" +
+	"\x0earguments_json\x18\x03 \x01(\tR\rargumentsJson\"\xcc\x01\n" +
 	"\rGenerateEvent\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\x04R\trequestId\x122\n" +
@@ -1465,10 +2379,17 @@ const file_inferno_v1_inference_proto_rawDesc = "" +
 	"\bfinished\x18\x04 \x01(\v2\x14.inferno.v1.FinishedH\x00R\bfinishedB\t\n" +
 	"\apayload\"\n" +
 	"\n" +
-	"\bAccepted\"B\n" +
+	"\bAccepted\"\xac\x02\n" +
 	"\x05Token\x12\x14\n" +
 	"\x05piece\x18\x01 \x01(\fR\x05piece\x12#\n" +
-	"\routput_tokens\x18\x02 \x01(\rR\foutputTokens\"\xa3\x01\n" +
+	"\routput_tokens\x18\x02 \x01(\rR\foutputTokens\x122\n" +
+	"\achannel\x18\x03 \x01(\x0e2\x18.inferno.v1.TokenChannelR\achannel\x124\n" +
+	"\x16advances_output_tokens\x18\x04 \x01(\bR\x14advancesOutputTokens\x12+\n" +
+	"\x0ftool_call_index\x18\x05 \x01(\rH\x00R\rtoolCallIndex\x88\x01\x01\x12 \n" +
+	"\ftool_call_id\x18\x06 \x01(\tR\n" +
+	"toolCallId\x12\x1b\n" +
+	"\ttool_name\x18\a \x01(\tR\btoolNameB\x12\n" +
+	"\x10_tool_call_index\"\xa3\x01\n" +
 	"\bFinished\x12/\n" +
 	"\x05state\x18\x01 \x01(\x0e2\x19.inferno.v1.TerminalStateR\x05state\x124\n" +
 	"\ametrics\x18\x02 \x01(\v2\x1a.inferno.v1.RequestMetricsR\ametrics\x120\n" +
@@ -1503,7 +2424,21 @@ const file_inferno_v1_inference_proto_rawDesc = "" +
 	"\x0eCancelResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\x04R\trequestId\x12?\n" +
-	"\vdisposition\x18\x02 \x01(\x0e2\x1d.inferno.v1.CancelDispositionR\vdisposition*\xa1\x02\n" +
+	"\vdisposition\x18\x02 \x01(\x0e2\x1d.inferno.v1.CancelDispositionR\vdisposition*\x7f\n" +
+	"\x12CompatibilityLevel\x12#\n" +
+	"\x1fCOMPATIBILITY_LEVEL_UNSPECIFIED\x10\x00\x12\"\n" +
+	"\x1eCOMPATIBILITY_LEVEL_COMPATIBLE\x10\x01\x12 \n" +
+	"\x1cCOMPATIBILITY_LEVEL_VERIFIED\x10\x02*\x91\x01\n" +
+	"\x14PromptTemplateSource\x12&\n" +
+	"\"PROMPT_TEMPLATE_SOURCE_UNSPECIFIED\x10\x00\x12#\n" +
+	"\x1fPROMPT_TEMPLATE_SOURCE_EMBEDDED\x10\x01\x12,\n" +
+	"(PROMPT_TEMPLATE_SOURCE_VERIFIED_FALLBACK\x10\x02*\xc1\x01\n" +
+	"\x11CapabilitySupport\x12\"\n" +
+	"\x1eCAPABILITY_SUPPORT_UNSPECIFIED\x10\x00\x12\"\n" +
+	"\x1eCAPABILITY_SUPPORT_UNAVAILABLE\x10\x01\x12\x1f\n" +
+	"\x1bCAPABILITY_SUPPORT_DETECTED\x10\x02\x12\x1f\n" +
+	"\x1bCAPABILITY_SUPPORT_VERIFIED\x10\x03\x12\"\n" +
+	"\x1eCAPABILITY_SUPPORT_UNQUALIFIED\x10\x04*\xa1\x02\n" +
 	"\x11MemorySamplePoint\x12#\n" +
 	"\x1fMEMORY_SAMPLE_POINT_UNSPECIFIED\x10\x00\x12%\n" +
 	"!MEMORY_SAMPLE_POINT_BACKEND_READY\x10\x01\x12%\n" +
@@ -1521,7 +2456,29 @@ const file_inferno_v1_inference_proto_rawDesc = "" +
 	"\x16BACKEND_STATE_NO_MODEL\x10\x02\x12\x19\n" +
 	"\x15BACKEND_STATE_LOADING\x10\x03\x12\x1a\n" +
 	"\x16BACKEND_STATE_DRAINING\x10\x04\x12\x18\n" +
-	"\x14BACKEND_STATE_FAILED\x10\x05*\xa4\x01\n" +
+	"\x14BACKEND_STATE_FAILED\x10\x05*o\n" +
+	"\n" +
+	"ToolChoice\x12\x1b\n" +
+	"\x17TOOL_CHOICE_UNSPECIFIED\x10\x00\x12\x14\n" +
+	"\x10TOOL_CHOICE_NONE\x10\x01\x12\x14\n" +
+	"\x10TOOL_CHOICE_AUTO\x10\x02\x12\x18\n" +
+	"\x14TOOL_CHOICE_REQUIRED\x10\x03*|\n" +
+	"\bChatRole\x12\x19\n" +
+	"\x15CHAT_ROLE_UNSPECIFIED\x10\x00\x12\x14\n" +
+	"\x10CHAT_ROLE_SYSTEM\x10\x01\x12\x12\n" +
+	"\x0eCHAT_ROLE_USER\x10\x02\x12\x17\n" +
+	"\x13CHAT_ROLE_ASSISTANT\x10\x03\x12\x12\n" +
+	"\x0eCHAT_ROLE_TOOL\x10\x04*\x8d\x01\n" +
+	"\x0eResponseFormat\x12\x1f\n" +
+	"\x1bRESPONSE_FORMAT_UNSPECIFIED\x10\x00\x12\x18\n" +
+	"\x14RESPONSE_FORMAT_TEXT\x10\x01\x12\x1f\n" +
+	"\x1bRESPONSE_FORMAT_JSON_OBJECT\x10\x02\x12\x1f\n" +
+	"\x1bRESPONSE_FORMAT_JSON_SCHEMA\x10\x03*\x82\x01\n" +
+	"\fTokenChannel\x12\x1d\n" +
+	"\x19TOKEN_CHANNEL_UNSPECIFIED\x10\x00\x12\x19\n" +
+	"\x15TOKEN_CHANNEL_CONTENT\x10\x01\x12\x1b\n" +
+	"\x17TOKEN_CHANNEL_REASONING\x10\x02\x12\x1b\n" +
+	"\x17TOKEN_CHANNEL_TOOL_CALL\x10\x03*\xa4\x01\n" +
 	"\rTerminalState\x12\x1e\n" +
 	"\x1aTERMINAL_STATE_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18TERMINAL_STATE_COMPLETED\x10\x01\x12\x1c\n" +
@@ -1560,58 +2517,85 @@ func file_inferno_v1_inference_proto_rawDescGZIP() []byte {
 	return file_inferno_v1_inference_proto_rawDescData
 }
 
-var file_inferno_v1_inference_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_inferno_v1_inference_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_inferno_v1_inference_proto_enumTypes = make([]protoimpl.EnumInfo, 13)
+var file_inferno_v1_inference_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_inferno_v1_inference_proto_goTypes = []any{
-	(MemorySamplePoint)(0),        // 0: inferno.v1.MemorySamplePoint
-	(MeasurementStatus)(0),        // 1: inferno.v1.MeasurementStatus
-	(BackendState)(0),             // 2: inferno.v1.BackendState
-	(TerminalState)(0),            // 3: inferno.v1.TerminalState
-	(ErrorCode)(0),                // 4: inferno.v1.ErrorCode
-	(CancelDisposition)(0),        // 5: inferno.v1.CancelDisposition
-	(*GetStatusRequest)(nil),      // 6: inferno.v1.GetStatusRequest
-	(*GetStatusResponse)(nil),     // 7: inferno.v1.GetStatusResponse
-	(*SchedulerSnapshot)(nil),     // 8: inferno.v1.SchedulerSnapshot
-	(*MemorySnapshot)(nil),        // 9: inferno.v1.MemorySnapshot
-	(*ProcessMemorySample)(nil),   // 10: inferno.v1.ProcessMemorySample
-	(*LlamaBufferAllocation)(nil), // 11: inferno.v1.LlamaBufferAllocation
-	(*GenerateRequest)(nil),       // 12: inferno.v1.GenerateRequest
-	(*GenerateEvent)(nil),         // 13: inferno.v1.GenerateEvent
-	(*Accepted)(nil),              // 14: inferno.v1.Accepted
-	(*Token)(nil),                 // 15: inferno.v1.Token
-	(*Finished)(nil),              // 16: inferno.v1.Finished
-	(*RequestMetrics)(nil),        // 17: inferno.v1.RequestMetrics
-	(*InferenceError)(nil),        // 18: inferno.v1.InferenceError
-	(*CancelRequest)(nil),         // 19: inferno.v1.CancelRequest
-	(*CancelResponse)(nil),        // 20: inferno.v1.CancelResponse
+	(CompatibilityLevel)(0),       // 0: inferno.v1.CompatibilityLevel
+	(PromptTemplateSource)(0),     // 1: inferno.v1.PromptTemplateSource
+	(CapabilitySupport)(0),        // 2: inferno.v1.CapabilitySupport
+	(MemorySamplePoint)(0),        // 3: inferno.v1.MemorySamplePoint
+	(MeasurementStatus)(0),        // 4: inferno.v1.MeasurementStatus
+	(BackendState)(0),             // 5: inferno.v1.BackendState
+	(ToolChoice)(0),               // 6: inferno.v1.ToolChoice
+	(ChatRole)(0),                 // 7: inferno.v1.ChatRole
+	(ResponseFormat)(0),           // 8: inferno.v1.ResponseFormat
+	(TokenChannel)(0),             // 9: inferno.v1.TokenChannel
+	(TerminalState)(0),            // 10: inferno.v1.TerminalState
+	(ErrorCode)(0),                // 11: inferno.v1.ErrorCode
+	(CancelDisposition)(0),        // 12: inferno.v1.CancelDisposition
+	(*GetStatusRequest)(nil),      // 13: inferno.v1.GetStatusRequest
+	(*GetStatusResponse)(nil),     // 14: inferno.v1.GetStatusResponse
+	(*ModelCapabilities)(nil),     // 15: inferno.v1.ModelCapabilities
+	(*SchedulerSnapshot)(nil),     // 16: inferno.v1.SchedulerSnapshot
+	(*MemorySnapshot)(nil),        // 17: inferno.v1.MemorySnapshot
+	(*ProcessMemorySample)(nil),   // 18: inferno.v1.ProcessMemorySample
+	(*LlamaBufferAllocation)(nil), // 19: inferno.v1.LlamaBufferAllocation
+	(*GenerateRequest)(nil),       // 20: inferno.v1.GenerateRequest
+	(*ToolDefinition)(nil),        // 21: inferno.v1.ToolDefinition
+	(*ChatMessage)(nil),           // 22: inferno.v1.ChatMessage
+	(*ToolCall)(nil),              // 23: inferno.v1.ToolCall
+	(*GenerateEvent)(nil),         // 24: inferno.v1.GenerateEvent
+	(*Accepted)(nil),              // 25: inferno.v1.Accepted
+	(*Token)(nil),                 // 26: inferno.v1.Token
+	(*Finished)(nil),              // 27: inferno.v1.Finished
+	(*RequestMetrics)(nil),        // 28: inferno.v1.RequestMetrics
+	(*InferenceError)(nil),        // 29: inferno.v1.InferenceError
+	(*CancelRequest)(nil),         // 30: inferno.v1.CancelRequest
+	(*CancelResponse)(nil),        // 31: inferno.v1.CancelResponse
 }
 var file_inferno_v1_inference_proto_depIdxs = []int32{
-	2,  // 0: inferno.v1.GetStatusResponse.state:type_name -> inferno.v1.BackendState
-	8,  // 1: inferno.v1.GetStatusResponse.scheduler:type_name -> inferno.v1.SchedulerSnapshot
-	9,  // 2: inferno.v1.GetStatusResponse.memory:type_name -> inferno.v1.MemorySnapshot
-	10, // 3: inferno.v1.MemorySnapshot.process_samples:type_name -> inferno.v1.ProcessMemorySample
-	11, // 4: inferno.v1.MemorySnapshot.llama_buffers:type_name -> inferno.v1.LlamaBufferAllocation
-	0,  // 5: inferno.v1.ProcessMemorySample.point:type_name -> inferno.v1.MemorySamplePoint
-	1,  // 6: inferno.v1.ProcessMemorySample.status:type_name -> inferno.v1.MeasurementStatus
-	14, // 7: inferno.v1.GenerateEvent.accepted:type_name -> inferno.v1.Accepted
-	15, // 8: inferno.v1.GenerateEvent.token:type_name -> inferno.v1.Token
-	16, // 9: inferno.v1.GenerateEvent.finished:type_name -> inferno.v1.Finished
-	3,  // 10: inferno.v1.Finished.state:type_name -> inferno.v1.TerminalState
-	17, // 11: inferno.v1.Finished.metrics:type_name -> inferno.v1.RequestMetrics
-	18, // 12: inferno.v1.Finished.error:type_name -> inferno.v1.InferenceError
-	4,  // 13: inferno.v1.InferenceError.code:type_name -> inferno.v1.ErrorCode
-	5,  // 14: inferno.v1.CancelResponse.disposition:type_name -> inferno.v1.CancelDisposition
-	6,  // 15: inferno.v1.InferenceService.GetStatus:input_type -> inferno.v1.GetStatusRequest
-	12, // 16: inferno.v1.InferenceService.Generate:input_type -> inferno.v1.GenerateRequest
-	19, // 17: inferno.v1.InferenceService.Cancel:input_type -> inferno.v1.CancelRequest
-	7,  // 18: inferno.v1.InferenceService.GetStatus:output_type -> inferno.v1.GetStatusResponse
-	13, // 19: inferno.v1.InferenceService.Generate:output_type -> inferno.v1.GenerateEvent
-	20, // 20: inferno.v1.InferenceService.Cancel:output_type -> inferno.v1.CancelResponse
-	18, // [18:21] is the sub-list for method output_type
-	15, // [15:18] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	5,  // 0: inferno.v1.GetStatusResponse.state:type_name -> inferno.v1.BackendState
+	16, // 1: inferno.v1.GetStatusResponse.scheduler:type_name -> inferno.v1.SchedulerSnapshot
+	17, // 2: inferno.v1.GetStatusResponse.memory:type_name -> inferno.v1.MemorySnapshot
+	15, // 3: inferno.v1.GetStatusResponse.model_capabilities:type_name -> inferno.v1.ModelCapabilities
+	0,  // 4: inferno.v1.ModelCapabilities.compatibility:type_name -> inferno.v1.CompatibilityLevel
+	1,  // 5: inferno.v1.ModelCapabilities.template_source:type_name -> inferno.v1.PromptTemplateSource
+	2,  // 6: inferno.v1.ModelCapabilities.queue_mode:type_name -> inferno.v1.CapabilitySupport
+	2,  // 7: inferno.v1.ModelCapabilities.continuous_mode:type_name -> inferno.v1.CapabilitySupport
+	2,  // 8: inferno.v1.ModelCapabilities.system_messages:type_name -> inferno.v1.CapabilitySupport
+	2,  // 9: inferno.v1.ModelCapabilities.multi_turn:type_name -> inferno.v1.CapabilitySupport
+	2,  // 10: inferno.v1.ModelCapabilities.thinking:type_name -> inferno.v1.CapabilitySupport
+	2,  // 11: inferno.v1.ModelCapabilities.tools:type_name -> inferno.v1.CapabilitySupport
+	18, // 12: inferno.v1.MemorySnapshot.process_samples:type_name -> inferno.v1.ProcessMemorySample
+	19, // 13: inferno.v1.MemorySnapshot.llama_buffers:type_name -> inferno.v1.LlamaBufferAllocation
+	3,  // 14: inferno.v1.ProcessMemorySample.point:type_name -> inferno.v1.MemorySamplePoint
+	4,  // 15: inferno.v1.ProcessMemorySample.status:type_name -> inferno.v1.MeasurementStatus
+	22, // 16: inferno.v1.GenerateRequest.messages:type_name -> inferno.v1.ChatMessage
+	21, // 17: inferno.v1.GenerateRequest.tools:type_name -> inferno.v1.ToolDefinition
+	6,  // 18: inferno.v1.GenerateRequest.tool_choice:type_name -> inferno.v1.ToolChoice
+	8,  // 19: inferno.v1.GenerateRequest.response_format:type_name -> inferno.v1.ResponseFormat
+	7,  // 20: inferno.v1.ChatMessage.role:type_name -> inferno.v1.ChatRole
+	23, // 21: inferno.v1.ChatMessage.tool_calls:type_name -> inferno.v1.ToolCall
+	25, // 22: inferno.v1.GenerateEvent.accepted:type_name -> inferno.v1.Accepted
+	26, // 23: inferno.v1.GenerateEvent.token:type_name -> inferno.v1.Token
+	27, // 24: inferno.v1.GenerateEvent.finished:type_name -> inferno.v1.Finished
+	9,  // 25: inferno.v1.Token.channel:type_name -> inferno.v1.TokenChannel
+	10, // 26: inferno.v1.Finished.state:type_name -> inferno.v1.TerminalState
+	28, // 27: inferno.v1.Finished.metrics:type_name -> inferno.v1.RequestMetrics
+	29, // 28: inferno.v1.Finished.error:type_name -> inferno.v1.InferenceError
+	11, // 29: inferno.v1.InferenceError.code:type_name -> inferno.v1.ErrorCode
+	12, // 30: inferno.v1.CancelResponse.disposition:type_name -> inferno.v1.CancelDisposition
+	13, // 31: inferno.v1.InferenceService.GetStatus:input_type -> inferno.v1.GetStatusRequest
+	20, // 32: inferno.v1.InferenceService.Generate:input_type -> inferno.v1.GenerateRequest
+	30, // 33: inferno.v1.InferenceService.Cancel:input_type -> inferno.v1.CancelRequest
+	14, // 34: inferno.v1.InferenceService.GetStatus:output_type -> inferno.v1.GetStatusResponse
+	24, // 35: inferno.v1.InferenceService.Generate:output_type -> inferno.v1.GenerateEvent
+	31, // 36: inferno.v1.InferenceService.Cancel:output_type -> inferno.v1.CancelResponse
+	34, // [34:37] is the sub-list for method output_type
+	31, // [31:34] is the sub-list for method input_type
+	31, // [31:31] is the sub-list for extension type_name
+	31, // [31:31] is the sub-list for extension extendee
+	0,  // [0:31] is the sub-list for field type_name
 }
 
 func init() { file_inferno_v1_inference_proto_init() }
@@ -1620,21 +2604,23 @@ func file_inferno_v1_inference_proto_init() {
 		return
 	}
 	file_inferno_v1_inference_proto_msgTypes[1].OneofWrappers = []any{}
-	file_inferno_v1_inference_proto_msgTypes[3].OneofWrappers = []any{}
 	file_inferno_v1_inference_proto_msgTypes[4].OneofWrappers = []any{}
-	file_inferno_v1_inference_proto_msgTypes[7].OneofWrappers = []any{
+	file_inferno_v1_inference_proto_msgTypes[5].OneofWrappers = []any{}
+	file_inferno_v1_inference_proto_msgTypes[7].OneofWrappers = []any{}
+	file_inferno_v1_inference_proto_msgTypes[11].OneofWrappers = []any{
 		(*GenerateEvent_Accepted)(nil),
 		(*GenerateEvent_Token)(nil),
 		(*GenerateEvent_Finished)(nil),
 	}
-	file_inferno_v1_inference_proto_msgTypes[11].OneofWrappers = []any{}
+	file_inferno_v1_inference_proto_msgTypes[13].OneofWrappers = []any{}
+	file_inferno_v1_inference_proto_msgTypes[15].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_inferno_v1_inference_proto_rawDesc), len(file_inferno_v1_inference_proto_rawDesc)),
-			NumEnums:      6,
-			NumMessages:   15,
+			NumEnums:      13,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

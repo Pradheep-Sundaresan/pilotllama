@@ -19,7 +19,15 @@ using SequenceId = std::size_t;
 struct BatchStepEvent {
     SequenceId sequence_id;
     bool decode_started = false;
-    std::optional<std::string> token_piece;
+    bool generated_token = false;
+    struct OutputPiece {
+        std::string bytes;
+        OutputChannel channel = OutputChannel::content;
+        std::uint32_t tool_call_index = 0;
+        std::string tool_call_id;
+        std::string tool_name;
+    };
+    std::vector<OutputPiece> output_pieces;
     bool finished = false;
     std::string error;
 };
@@ -31,6 +39,7 @@ class BatchExecutor {
 public:
     virtual ~BatchExecutor() = default;
     virtual std::optional<MemorySnapshot> memory_snapshot() const { return std::nullopt; }
+    virtual std::optional<ModelCapabilities> model_capabilities() const { return std::nullopt; }
     virtual std::size_t admit(SequenceId sequence_id, const GenerationRequest& request) = 0;
     virtual std::vector<BatchStepEvent> step(std::span<const SequenceId> sequences,
                                              std::size_t prefill_chunk_tokens) = 0;
@@ -58,6 +67,7 @@ public:
     [[nodiscard]] Submission submit(GenerationRequest request, InferenceBackend::TokenCallback token = {}) override;
     [[nodiscard]] SchedulerSnapshot scheduler_snapshot() const override;
     [[nodiscard]] std::optional<MemorySnapshot> memory_snapshot() const override;
+    [[nodiscard]] std::optional<ModelCapabilities> model_capabilities() const override;
     void shutdown() override;
 
 private:

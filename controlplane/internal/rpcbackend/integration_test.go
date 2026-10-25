@@ -234,6 +234,23 @@ func TestIntegrationStatusStreamingAndHTTPReadiness(t *testing.T) {
 	}
 }
 
+func TestIntegrationReasoningChannels(t *testing.T) {
+	f := startFixture(t, false)
+	request := request(17, "reasoning")
+	request.MaxOutputTokens = 2
+	request.EnableThinking = true
+	var pieces []rpcbackend.OutputPiece
+	result, err := f.client.GeneratePieces(contextFor(t, time.Second), request, func(piece rpcbackend.OutputPiece) error {
+		pieces = append(pieces, rpcbackend.OutputPiece{Bytes: append([]byte(nil), piece.Bytes...), Channel: piece.Channel})
+		return nil
+	})
+	if err != nil || !result.TransportComplete || len(pieces) != 2 ||
+		pieces[0].Channel != pb.TokenChannel_TOKEN_CHANNEL_REASONING || string(pieces[0].Bytes) != "because" ||
+		pieces[1].Channel != pb.TokenChannel_TOKEN_CHANNEL_CONTENT || string(pieces[1].Bytes) != "answer" {
+		t.Fatalf("result=%+v pieces=%+v err=%v", result, pieces, err)
+	}
+}
+
 func TestIntegrationNoModelAndValidation(t *testing.T) {
 	f := startFixture(t, true)
 	ctx := contextFor(t, 2*time.Second)

@@ -3,6 +3,7 @@ package rpcbackend
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"math"
@@ -21,7 +22,19 @@ import (
 	pb "inferno.local/controlplane/gen/inferno/v1"
 )
 
-const MessageLimit = 128 * 1024
+const MessageLimit = 2 * 1024 * 1024
+
+func validToolName(name string) bool {
+	if len(name) < 1 || len(name) > 64 {
+		return false
+	}
+	for _, c := range []byte(name) {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-') {
+			return false
+		}
+	}
+	return true
+}
 
 func ValidateTarget(target string) error {
 	host, port, err := net.SplitHostPort(target)
@@ -176,6 +189,15 @@ type Observation struct {
 	ErrorDetails      *pb.InferenceError
 }
 
+type OutputPiece struct {
+	Bytes                []byte
+	Channel              pb.TokenChannel
+	AdvancesOutputTokens bool
+	ToolCallIndex        uint32
+	ToolCallID           string
+	ToolName             string
+}
+
 func invalid(message string) error { return status.Error(codes.DataLoss, message) }
 func validateFinished(f *pb.Finished, id uint64, count uint32) error {
 	if f == nil || f.Metrics == nil || f.Metrics.RuntimeLatencyMs == nil || f.State < pb.TerminalState_TERMINAL_STATE_COMPLETED || f.State > pb.TerminalState_TERMINAL_STATE_FAILED {
@@ -228,7 +250,19 @@ func trailerDetail(md metadata.MD, id uint64) (*pb.InferenceError, error) {
 // Consumers must return promptly; context cancellation cannot interrupt their code.
 // A valid Finished with a failed native state is returned without an RPC error:
 // callers must inspect Finished.State as well as TransportComplete.
-func (c *Client) Generate(ctx context.Context, request *pb.GenerateRequest, consume func([]byte) error) (observation Observation, err error) {
+func (c *Client) Generate(ctx context.Context, request *pb.GenerateRequest, consume func([]byte) error) (Observation, error) {
+	if request != nil && request.EnableThinking {
+		return Observation{}, status.Error(codes.InvalidArgument, "thinking requires the channel-aware client")
+	}
+	return c.GeneratePieces(ctx, request, func(piece OutputPiece) error {
+		if consume == nil {
+			return nil
+		}
+		return consume(piece.Bytes)
+	})
+}
+
+func (c *Client) GeneratePieces(ctx context.Context, request *pb.GenerateRequest, consume func(OutputPiece) error) (observation Observation, err error) {
 	var start time.Time
 	defer func() {
 		if start.IsZero() {
@@ -245,7 +279,41 @@ func (c *Client) Generate(ctx context.Context, request *pb.GenerateRequest, cons
 		return observation, status.Error(codes.InvalidArgument, "missing request")
 	}
 	observation.RequestID = request.RequestId
-	if request.RequestId == 0 || request.MaxOutputTokens < 1 || request.MaxOutputTokens > 512 || len(request.Prompt) > 65536 || !utf8.ValidString(request.Prompt) || strings.Contains(request.Prompt, "<|im_start|>") || strings.Contains(request.Prompt, "<|im_end|>") || proto.Size(request) > MessageLimit {
+	stopBytes := 0
+	validSampling := !math.IsNaN(float64(request.Temperature)) && !math.IsInf(float64(request.Temperature), 0) && request.Temperature >= 0 && request.Temperature <= 2 &&
+		!math.IsNaN(float64(request.TopP)) && !math.IsInf(float64(request.TopP), 0) && request.TopP >= 0 && request.TopP <= 1 && request.TopK >= 0 && request.TopK <= 100000 && len(request.Stop) <= 4
+	for _, stop := range request.Stop {
+		if stop == "" || len(stop) > 256 || !utf8.ValidString(stop) || stopBytes > 512-len(stop) {
+			validSampling = false
+			break
+		}
+		stopBytes += len(stop)
+	}
+	validTools, toolBytes, names := len(request.Tools) <= 16, 0, map[string]bool{}
+	for _, tool := range request.Tools {
+		var object map[string]any
+		validName := tool != nil && len(tool.Name) >= 1 && len(tool.Name) <= 64
+		if validName {
+			for _, c := range []byte(tool.Name) {
+				if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-') {
+					validName = false
+					break
+				}
+			}
+		}
+		if !validName || names[tool.Name] || len(tool.Description) > 1024 || !utf8.ValidString(tool.Description) ||
+			len(tool.ParametersJson) == 0 || len(tool.ParametersJson) > 16384 || toolBytes > 65536-len(tool.ParametersJson) ||
+			json.Unmarshal([]byte(tool.ParametersJson), &object) != nil || object == nil {
+			validTools = false
+			break
+		}
+		names[tool.Name], toolBytes = true, toolBytes+len(tool.ParametersJson)
+	}
+	if request.ToolChoice < pb.ToolChoice_TOOL_CHOICE_UNSPECIFIED || request.ToolChoice > pb.ToolChoice_TOOL_CHOICE_REQUIRED ||
+		(len(request.Tools) == 0 && request.ToolChoice != pb.ToolChoice_TOOL_CHOICE_UNSPECIFIED && request.ToolChoice != pb.ToolChoice_TOOL_CHOICE_NONE) {
+		validTools = false
+	}
+	if request.RequestId == 0 || request.MaxOutputTokens < 1 || request.MaxOutputTokens > 1048576 || !validGenerationInput(request) || !validSampling || !validTools || proto.Size(request) > MessageLimit {
 		return observation, status.Error(codes.InvalidArgument, "invalid generation request")
 	}
 	deadline, ok := ctx.Deadline()
@@ -265,6 +333,11 @@ func (c *Client) Generate(ctx context.Context, request *pb.GenerateRequest, cons
 		return observation, err
 	}
 	accepted := false
+	type toolState struct {
+		id, name  string
+		arguments []byte
+	}
+	toolCalls := map[uint32]*toolState{}
 	for {
 		event, receiveErr := stream.Recv()
 		if receiveErr != nil {
@@ -297,17 +370,61 @@ func (c *Client) Generate(ctx context.Context, request *pb.GenerateRequest, cons
 			}
 			accepted = true
 		case *pb.GenerateEvent_Token:
-			if !accepted || payload.Token == nil || payload.Token.OutputTokens != observation.ReceivedTokens+1 || payload.Token.OutputTokens > request.MaxOutputTokens || len(payload.Token.Piece) > 65536 {
+			expected := observation.ReceivedTokens
+			if payload.Token != nil && payload.Token.AdvancesOutputTokens {
+				expected++
+			}
+			isTool := payload.Token != nil && payload.Token.Channel == pb.TokenChannel_TOKEN_CHANNEL_TOOL_CALL
+			if !accepted || payload.Token == nil || payload.Token.OutputTokens != expected || payload.Token.OutputTokens > request.MaxOutputTokens || len(payload.Token.Piece) > 65536 ||
+				(!payload.Token.AdvancesOutputTokens && ((len(payload.Token.Piece) == 0 && !isTool) || observation.ReceivedTokens == 0)) ||
+				(payload.Token.Channel != pb.TokenChannel_TOKEN_CHANNEL_CONTENT && payload.Token.Channel != pb.TokenChannel_TOKEN_CHANNEL_REASONING && !isTool) ||
+				(!request.EnableThinking && payload.Token.Channel == pb.TokenChannel_TOKEN_CHANNEL_REASONING) {
 				return observation, invalid("invalid token event")
 			}
-			if observation.TTFTMS == nil {
+			if isTool {
+				if len(request.Tools) == 0 || payload.Token.AdvancesOutputTokens || payload.Token.ToolCallIndex == nil || payload.Token.GetToolCallIndex() >= 16 ||
+					len(payload.Token.ToolCallId) > 128 || len(payload.Token.ToolName) > 64 || !utf8.ValidString(payload.Token.ToolCallId) || !utf8.ValidString(payload.Token.ToolName) ||
+					(len(payload.Token.Piece) == 0 && payload.Token.ToolCallId == "" && payload.Token.ToolName == "") {
+					return observation, invalid("invalid tool-call event")
+				}
+				state := toolCalls[payload.Token.GetToolCallIndex()]
+				if state == nil {
+					if int(payload.Token.GetToolCallIndex()) != len(toolCalls) {
+						return observation, invalid("non-contiguous tool-call index")
+					}
+					state = &toolState{}
+					toolCalls[payload.Token.GetToolCallIndex()] = state
+				}
+				if payload.Token.ToolCallId != "" {
+					if state.id != "" && state.id != payload.Token.ToolCallId {
+						return observation, invalid("tool-call ID changed")
+					}
+					state.id = payload.Token.ToolCallId
+				}
+				if payload.Token.ToolName != "" {
+					if state.name != "" && !strings.HasPrefix(payload.Token.ToolName, state.name) {
+						return observation, invalid("tool name changed")
+					}
+					state.name = payload.Token.ToolName
+				}
+				state.arguments = append(state.arguments, payload.Token.Piece...)
+				if len(state.arguments) > 65536 {
+					return observation, invalid("tool arguments exceed bound")
+				}
+			} else if payload.Token.ToolCallIndex != nil || payload.Token.ToolCallId != "" || payload.Token.ToolName != "" {
+				return observation, invalid("tool metadata on non-tool output")
+			}
+			if payload.Token.AdvancesOutputTokens && observation.TTFTMS == nil {
 				value := float64(time.Since(start)) / float64(time.Millisecond)
 				observation.TTFTMS = &value
 			}
-			observation.ReceivedTokens++
+			if payload.Token.AdvancesOutputTokens {
+				observation.ReceivedTokens++
+			}
 			observation.TokenBytes += uint64(len(payload.Token.Piece))
 			if consume != nil {
-				if err := consume(payload.Token.Piece); err != nil {
+				if err := consume(OutputPiece{Bytes: payload.Token.Piece, Channel: payload.Token.Channel, AdvancesOutputTokens: payload.Token.AdvancesOutputTokens,
+					ToolCallIndex: payload.Token.GetToolCallIndex(), ToolCallID: payload.Token.ToolCallId, ToolName: payload.Token.ToolName}); err != nil {
 					return observation, err
 				}
 			}
@@ -318,6 +435,19 @@ func (c *Client) Generate(ctx context.Context, request *pb.GenerateRequest, cons
 			if err := validateFinished(payload.Finished, request.RequestId, observation.ReceivedTokens); err != nil {
 				return observation, err
 			}
+			for _, call := range toolCalls {
+				known := false
+				for _, tool := range request.Tools {
+					if tool.Name == call.name {
+						known = true
+						break
+					}
+				}
+				var arguments map[string]any
+				if !known || json.Unmarshal(call.arguments, &arguments) != nil || arguments == nil {
+					return observation, invalid("invalid completed tool call")
+				}
+			}
 			if payload.Finished.Metrics.OutputTokens > request.MaxOutputTokens {
 				return observation, invalid("terminal count exceeds budget")
 			}
@@ -326,4 +456,79 @@ func (c *Client) Generate(ctx context.Context, request *pb.GenerateRequest, cons
 			return observation, invalid("missing/unknown stream payload")
 		}
 	}
+}
+
+func validGenerationInput(request *pb.GenerateRequest) bool {
+	if request.ResponseFormat < pb.ResponseFormat_RESPONSE_FORMAT_UNSPECIFIED || request.ResponseFormat > pb.ResponseFormat_RESPONSE_FORMAT_JSON_SCHEMA || len(request.ResponseSchemaJson) > 65536 {
+		return false
+	}
+	format := request.ResponseFormat
+	if format == pb.ResponseFormat_RESPONSE_FORMAT_UNSPECIFIED {
+		format = pb.ResponseFormat_RESPONSE_FORMAT_TEXT
+	}
+	if format == pb.ResponseFormat_RESPONSE_FORMAT_JSON_SCHEMA && request.ResponseSchemaJson == "" {
+		return false
+	}
+	if format != pb.ResponseFormat_RESPONSE_FORMAT_TEXT {
+		var object map[string]any
+		if json.Unmarshal([]byte(request.ResponseSchemaJson), &object) != nil || object == nil || len(request.Tools) != 0 {
+			return false
+		}
+	}
+	if request.Prompt != "" {
+		return len(request.Messages) == 0 && len(request.Prompt) <= 1024*1024 && utf8.ValidString(request.Prompt) &&
+			!strings.Contains(request.Prompt, "<|im_start|>") && !strings.Contains(request.Prompt, "<|im_end|>")
+	}
+	if len(request.Messages) < 1 || len(request.Messages) > 64 {
+		return false
+	}
+	total, expected, pending := 0, "user", map[string]bool{}
+	for index, message := range request.Messages {
+		if message == nil || len(message.Content) > 1024*1024-total || !utf8.ValidString(message.Content) ||
+			strings.Contains(message.Content, "<|im_start|>") || strings.Contains(message.Content, "<|im_end|>") {
+			return false
+		}
+		total += len(message.Content)
+		if message.Role == pb.ChatRole_CHAT_ROLE_SYSTEM {
+			if index != 0 || len(message.ToolCalls) != 0 || message.ToolCallId != "" {
+				return false
+			}
+			continue
+		}
+		switch message.Role {
+		case pb.ChatRole_CHAT_ROLE_USER:
+			if expected != "user" || len(message.ToolCalls) != 0 || message.ToolCallId != "" {
+				return false
+			}
+			expected = "assistant"
+		case pb.ChatRole_CHAT_ROLE_ASSISTANT:
+			if (expected != "assistant" && expected != "assistant_after_tools") || message.ToolCallId != "" || len(message.ToolCalls) > 16 {
+				return false
+			}
+			pending = map[string]bool{}
+			for _, call := range message.ToolCalls {
+				var object map[string]any
+				if call == nil || call.Id == "" || len(call.Id) > 128 || !validToolName(call.Name) || len(call.ArgumentsJson) > 65536 || json.Unmarshal([]byte(call.ArgumentsJson), &object) != nil || object == nil || pending[call.Id] {
+					return false
+				}
+				pending[call.Id] = true
+			}
+			if len(pending) == 0 {
+				expected = "user"
+			} else {
+				expected = "tools"
+			}
+		case pb.ChatRole_CHAT_ROLE_TOOL:
+			if expected != "tools" || len(message.ToolCalls) != 0 || !pending[message.ToolCallId] {
+				return false
+			}
+			delete(pending, message.ToolCallId)
+			if len(pending) == 0 {
+				expected = "assistant_after_tools"
+			}
+		default:
+			return false
+		}
+	}
+	return expected == "assistant" || expected == "assistant_after_tools"
 }

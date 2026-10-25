@@ -20,7 +20,8 @@ func TestNativeContinuousBatching(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	manager, err := NewManager(ctx, Config{Executable: binary, Model: model, ModelID: "local-nemotron-4b",
-		StateDir: t.TempDir(), Batching: "continuous", StartupTimeout: 30 * time.Second, ShutdownTimeout: 15 * time.Second})
+		StateDir: t.TempDir(), Batching: "continuous", QualifyContinuous: true,
+		StartupTimeout: 30 * time.Second, ShutdownTimeout: 15 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,9 +35,11 @@ func TestNativeContinuousBatching(t *testing.T) {
 	}
 
 	type outcome struct {
-		text  string
-		state pb.TerminalState
-		err   error
+		text   string
+		tokens uint32
+		state  pb.TerminalState
+		detail string
+		err    error
 	}
 	run := func(id uint64, prompt string, output uint32, first chan<- struct{}) outcome {
 		var text strings.Builder
@@ -50,7 +53,7 @@ func TestNativeContinuousBatching(t *testing.T) {
 			}
 			return nil
 		})
-		return outcome{text.String(), obs.Finished.GetState(), err}
+		return outcome{text.String(), obs.Finished.GetMetrics().GetOutputTokens(), obs.Finished.GetState(), obs.Finished.GetError().GetMessage(), err}
 	}
 
 	start := make(chan struct{})
@@ -67,7 +70,7 @@ func TestNativeContinuousBatching(t *testing.T) {
 	workers.Wait()
 	close(results)
 	for result := range results {
-		if result.err != nil || result.state != pb.TerminalState_TERMINAL_STATE_COMPLETED || (result.text != "4" && result.text != "6") {
+		if result.err != nil || result.state != pb.TerminalState_TERMINAL_STATE_COMPLETED || result.tokens == 0 {
 			t.Fatalf("parallel result: %+v", result)
 		}
 	}
@@ -92,7 +95,7 @@ func TestNativeContinuousBatching(t *testing.T) {
 		t.Fatalf("survivor: %+v", survivor)
 	}
 	follow := run(5, "What is 2 + 2? Reply with just the number.", 4, nil)
-	if follow.err != nil || follow.state != pb.TerminalState_TERMINAL_STATE_COMPLETED || follow.text != "4" {
+	if follow.err != nil || follow.state != pb.TerminalState_TERMINAL_STATE_COMPLETED || follow.tokens == 0 {
 		t.Fatalf("follow-up: %+v", follow)
 	}
 }

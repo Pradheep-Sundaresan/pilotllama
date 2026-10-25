@@ -13,7 +13,7 @@ namespace {
 using namespace inferno;
 
 GenerationRequest request(RequestId id, std::string prompt = "hello") {
-    return {id, std::move(prompt), 32, std::nullopt};
+    return {id, std::move(prompt), 32, std::nullopt, {}};
 }
 
 class FakeBackend final : public InferenceBackend {
@@ -47,6 +47,12 @@ public:
             token("one");
             token("");
             token("two");
+        } else if (req.prompt == "channels") {
+            token({"why", OutputChannel::reasoning});
+            token({"answer", OutputChannel::content});
+        } else if (req.prompt == "parser-flush") {
+            token({"why", OutputChannel::reasoning, true});
+            token({" answer", OutputChannel::content, false});
         } else {
             token("fake:" + req.prompt);
         }
@@ -81,6 +87,29 @@ private:
 TEST(Runtime, RequiresBackendAndPositiveCapacity) {
     EXPECT_THROW(Runtime(nullptr, 1), std::invalid_argument);
     EXPECT_THROW(Runtime(std::make_unique<FakeBackend>(), 0), std::invalid_argument);
+}
+
+TEST(Runtime, ParserFlushDoesNotInventANativeToken) {
+    Runtime runtime(std::make_unique<FakeBackend>(), 1);
+    std::vector<GeneratedPiece> pieces;
+    auto submission = runtime.submit(request(2, "parser-flush"), [&](GeneratedPiece piece) { pieces.push_back(piece); });
+    const auto result = submission.completion.get();
+    ASSERT_EQ(result.state, RequestState::completed);
+    EXPECT_EQ(result.metrics.output_tokens, 1U);
+    EXPECT_EQ(result.text, "why answer");
+    ASSERT_EQ(pieces.size(), 2U);
+    EXPECT_TRUE(pieces[0].advances_output_tokens);
+    EXPECT_FALSE(pieces[1].advances_output_tokens);
+}
+
+TEST(Runtime, PreservesReasoningAndContentChannels) {
+    Runtime runtime(std::make_unique<FakeBackend>(), 1);
+    std::vector<OutputChannel> channels;
+    auto submission = runtime.submit(request(1, "channels"), [&](GeneratedPiece piece) { channels.push_back(piece.channel); });
+    const auto result = submission.completion.get();
+    EXPECT_EQ(result.state, RequestState::completed);
+    EXPECT_EQ(result.text, "whyanswer");
+    EXPECT_EQ(channels, (std::vector<OutputChannel>{OutputChannel::reasoning, OutputChannel::content}));
 }
 
 TEST(Runtime, CompletesAndPreservesRequestIdentity) {
@@ -238,7 +267,7 @@ TEST(Runtime, ConcurrentSubmittersAndShutdownResolveEverySubmission) {
 TEST(Runtime, StreamsInOrderAndCountsEmptyTokenPieces) {
     Runtime runtime(std::make_unique<FakeBackend>(), 1);
     std::vector<std::string> pieces;
-    auto submission = runtime.submit(request(1, "pieces"), [&](std::string_view piece) { pieces.emplace_back(piece); });
+    auto submission = runtime.submit(request(1, "pieces"), [&](GeneratedPiece piece) { pieces.emplace_back(piece.bytes); });
     const auto result = submission.completion.get();
     EXPECT_EQ(pieces, (std::vector<std::string>{"one", "", "two"}));
     EXPECT_EQ(result.text, "onetwo");
@@ -254,7 +283,7 @@ TEST(Runtime, SlowConsumerBackpressuresWithoutAnExtraQueue) {
     std::promise<void> release;
     auto released = release.get_future().share();
     std::atomic<unsigned> calls{0};
-    auto submission = runtime.submit(request(1, "pieces"), [&](std::string_view) {
+    auto submission = runtime.submit(request(1, "pieces"), [&](GeneratedPiece) {
         if (++calls == 1) {
             first.set_value();
             released.wait();
@@ -270,7 +299,7 @@ TEST(Runtime, SlowConsumerBackpressuresWithoutAnExtraQueue) {
 
 TEST(Runtime, CallbackFailureIsTerminalButWorkerRemainsUsable) {
     Runtime runtime(std::make_unique<FakeBackend>(), 1);
-    auto failed = runtime.submit(request(1, "pieces"), [](std::string_view) {
+    auto failed = runtime.submit(request(1, "pieces"), [](GeneratedPiece) {
         throw std::runtime_error("consumer disconnected");
     }).completion.get();
     EXPECT_EQ(failed.state, RequestState::failed);
@@ -286,7 +315,7 @@ TEST(Runtime, EnforcesTokenEventBudget) {
     auto req = request(1, "pieces");
     req.max_output_tokens = 2;
     unsigned calls = 0;
-    const auto failed = runtime.submit(req, [&](std::string_view) { ++calls; }).completion.get();
+    const auto failed = runtime.submit(req, [&](GeneratedPiece) { ++calls; }).completion.get();
     EXPECT_EQ(failed.state, RequestState::failed);
     EXPECT_EQ(calls, 2U);
     EXPECT_EQ(failed.metrics.output_tokens, 2U);
@@ -357,7 +386,7 @@ TEST(Runtime, TokenCallbackCanRequestCancellation) {
     std::promise<std::shared_ptr<RequestControl>> published;
     auto handle = published.get_future().share();
     unsigned calls = 0;
-    auto active = runtime.submit(request(1, "pieces"), [&](std::string_view) {
+    auto active = runtime.submit(request(1, "pieces"), [&](GeneratedPiece) {
         ++calls;
         (void) handle.get()->cancel();
     });

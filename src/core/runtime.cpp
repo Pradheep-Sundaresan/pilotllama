@@ -83,6 +83,10 @@ std::optional<MemorySnapshot> Runtime::memory_snapshot() const {
     return backend_->memory_snapshot();
 }
 
+std::optional<ModelCapabilities> Runtime::model_capabilities() const {
+    return backend_->model_capabilities();
+}
+
 void Runtime::shutdown() {
     // Serialize join calls without holding admission_mutex_ while waiting for work.
     std::lock_guard join_lock(shutdown_mutex_);
@@ -114,17 +118,20 @@ void Runtime::work() {
                 item->control->checkpoint();
                 advance(*item->lifecycle, RequestState::decoding);
                 item->timings.decode_started = RequestClock::now();
-            }, [&](std::string_view piece) {
+            }, [&](GeneratedPiece piece) {
                 item->control->checkpoint();
                 if (item->lifecycle->state() != RequestState::decoding ||
-                    item->timings.output_tokens >= item->request.max_output_tokens) {
+                    (piece.advances_output_tokens && item->timings.output_tokens >= item->request.max_output_tokens) ||
+                    (!piece.advances_output_tokens && ((piece.bytes.empty() && piece.channel != OutputChannel::tool_call) || item->timings.output_tokens == 0))) {
                     throw std::logic_error("Invalid backend token event or output budget exceeded");
                 }
-                const auto now = RequestClock::now();
-                if (!item->timings.first_token) item->timings.first_token = now;
-                item->timings.last_token = now;
-                ++item->timings.output_tokens;
-                result.text.append(piece);
+                if (piece.advances_output_tokens) {
+                    const auto now = RequestClock::now();
+                    if (!item->timings.first_token) item->timings.first_token = now;
+                    item->timings.last_token = now;
+                    ++item->timings.output_tokens;
+                }
+                if (piece.channel != OutputChannel::tool_call) result.text.append(piece.bytes);
                 if (item->token) item->token(piece);
                 item->control->checkpoint();
             }, [&] { item->control->checkpoint(); });

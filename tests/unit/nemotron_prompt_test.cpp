@@ -19,6 +19,6 @@ TEST(NemotronPrompt, RejectsEmbeddedControlDelimiters) {
 }
 
 TEST(NemotronPrompt, EnforcesInputByteLimit) {
-    EXPECT_NO_THROW((void) inferno::format_nemotron_prompt(std::string(65536, 'x')));
-    EXPECT_THROW((void) inferno::format_nemotron_prompt(std::string(65537, 'x')), std::invalid_argument);
+    EXPECT_NO_THROW((void) inferno::format_nemotron_prompt(std::string(1024 * 1024, 'x')));
+    EXPECT_THROW((void) inferno::format_nemotron_prompt(std::string(1024 * 1024 + 1, 'x')), std::invalid_argument);
 }

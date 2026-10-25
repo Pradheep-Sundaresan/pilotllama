@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"mime"
 	"net/http"
 	"strconv"
@@ -20,23 +21,222 @@ import (
 	"inferno.local/controlplane/internal/rpcbackend"
 )
 
-const bodyLimit = 128 * 1024
+const bodyLimit = 1024*1024 + 64*1024
 const outputLimit = 1024 * 1024
 
 var errText = errors.New("invalid backend UTF-8")
 var errOutput = errors.New("output exceeds HTTP byte limit")
 
 type chatRequest struct {
-	Model    string `json:"model"`
-	Messages []struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
-	} `json:"messages"`
-	Stream              bool     `json:"stream"`
-	MaxTokens           *int     `json:"max_tokens"`
-	MaxCompletionTokens *int     `json:"max_completion_tokens"`
-	Temperature         *float64 `json:"temperature"`
-	N                   *int     `json:"n"`
+	Model               string               `json:"model"`
+	Messages            []chatMessageInput   `json:"messages"`
+	Stream              bool                 `json:"stream"`
+	MaxTokens           *int                 `json:"max_tokens"`
+	MaxCompletionTokens *int                 `json:"max_completion_tokens"`
+	Temperature         *float64             `json:"temperature"`
+	TopP                *float64             `json:"top_p"`
+	TopK                *int                 `json:"top_k"`
+	Seed                *int64               `json:"seed"`
+	Stop                stopInput            `json:"stop"`
+	N                   *int                 `json:"n"`
+	Thinking            bool                 `json:"thinking"`
+	Tools               []toolInput          `json:"tools"`
+	ToolChoice          *string              `json:"tool_choice"`
+	ResponseFormat      *responseFormatInput `json:"response_format"`
+}
+
+type responseFormatInput struct {
+	Type       string `json:"type"`
+	JSONSchema *struct {
+		Name   string          `json:"name"`
+		Strict *bool           `json:"strict"`
+		Schema json.RawMessage `json:"schema"`
+	} `json:"json_schema"`
+}
+
+type toolInput struct {
+	Type     string `json:"type"`
+	Function struct {
+		Name        string          `json:"name"`
+		Description string          `json:"description"`
+		Parameters  json.RawMessage `json:"parameters"`
+	} `json:"function"`
+}
+
+func validToolName(name string) bool {
+	if len(name) < 1 || len(name) > 64 {
+		return false
+	}
+	for _, c := range []byte(name) {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+func validateTools(tools []toolInput, choice *string) ([]*pb.ToolDefinition, pb.ToolChoice, bool) {
+	selected := pb.ToolChoice_TOOL_CHOICE_NONE
+	if len(tools) > 0 {
+		selected = pb.ToolChoice_TOOL_CHOICE_AUTO
+	}
+	if choice != nil {
+		switch *choice {
+		case "none":
+			selected = pb.ToolChoice_TOOL_CHOICE_NONE
+		case "auto":
+			selected = pb.ToolChoice_TOOL_CHOICE_AUTO
+		case "required":
+			selected = pb.ToolChoice_TOOL_CHOICE_REQUIRED
+		default:
+			return nil, 0, false
+		}
+	}
+	if len(tools) == 0 {
+		return nil, selected, selected == pb.ToolChoice_TOOL_CHOICE_NONE
+	}
+	if len(tools) > 16 {
+		return nil, 0, false
+	}
+	result, names, total := make([]*pb.ToolDefinition, 0, len(tools)), map[string]bool{}, 0
+	for _, tool := range tools {
+		var object map[string]any
+		if tool.Type != "function" || !validToolName(tool.Function.Name) || names[tool.Function.Name] ||
+			len(tool.Function.Description) > 1024 || !utf8.ValidString(tool.Function.Description) ||
+			len(tool.Function.Parameters) == 0 || len(tool.Function.Parameters) > 16384 ||
+			total > 65536-len(tool.Function.Parameters) || json.Unmarshal(tool.Function.Parameters, &object) != nil || object == nil {
+			return nil, 0, false
+		}
+		names[tool.Function.Name] = true
+		total += len(tool.Function.Parameters)
+		result = append(result, &pb.ToolDefinition{Name: tool.Function.Name, Description: tool.Function.Description, ParametersJson: string(tool.Function.Parameters)})
+	}
+	return result, selected, true
+}
+
+type stopInput []string
+
+func (s *stopInput) UnmarshalJSON(data []byte) error {
+	var one string
+	if json.Unmarshal(data, &one) == nil {
+		*s = []string{one}
+		return nil
+	}
+	var many []string
+	if json.Unmarshal(data, &many) != nil {
+		return errors.New("stop must be a string or string array")
+	}
+	*s = many
+	return nil
+}
+
+func validStops(stops []string) bool {
+	if len(stops) > 4 {
+		return false
+	}
+	total := 0
+	for _, stop := range stops {
+		if stop == "" || len(stop) > 256 || !utf8.ValidString(stop) || total > 512-len(stop) {
+			return false
+		}
+		total += len(stop)
+	}
+	return true
+}
+
+type chatMessageInput struct {
+	Role      string `json:"role"`
+	Content   string `json:"content"`
+	ToolCalls []struct {
+		ID       string `json:"id"`
+		Type     string `json:"type"`
+		Function struct {
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		} `json:"function"`
+	} `json:"tool_calls"`
+	ToolCallID string `json:"tool_call_id"`
+}
+
+func validateChatMessages(messages []chatMessageInput) ([]*pb.ChatMessage, bool) {
+	if len(messages) < 1 || len(messages) > 64 {
+		return nil, false
+	}
+	total, expected, pending := 0, "user", map[string]bool{}
+	result := make([]*pb.ChatMessage, 0, len(messages))
+	for index, message := range messages {
+		if len(message.Content) > 1024*1024-total || strings.Contains(message.Content, "<|im_start|>") || strings.Contains(message.Content, "<|im_end|>") {
+			return nil, false
+		}
+		total += len(message.Content)
+		wire := &pb.ChatMessage{Content: message.Content, ToolCallId: message.ToolCallID}
+		switch message.Role {
+		case "system":
+			if index != 0 || len(message.ToolCalls) != 0 || message.ToolCallID != "" {
+				return nil, false
+			}
+			wire.Role = pb.ChatRole_CHAT_ROLE_SYSTEM
+			result = append(result, wire)
+			continue
+		case "user":
+			if expected != "user" || len(message.ToolCalls) != 0 || message.ToolCallID != "" {
+				return nil, false
+			}
+			wire.Role, expected = pb.ChatRole_CHAT_ROLE_USER, "assistant"
+		case "assistant":
+			if (expected != "assistant" && expected != "assistant_after_tools") || message.ToolCallID != "" || len(message.ToolCalls) > 16 {
+				return nil, false
+			}
+			wire.Role, pending = pb.ChatRole_CHAT_ROLE_ASSISTANT, map[string]bool{}
+			for _, call := range message.ToolCalls {
+				var args map[string]any
+				if len(call.ID) < 1 || len(call.ID) > 128 || call.Type != "function" || !validToolName(call.Function.Name) || len(call.Function.Arguments) > 65536 || json.Unmarshal([]byte(call.Function.Arguments), &args) != nil || args == nil || pending[call.ID] {
+					return nil, false
+				}
+				total += len(call.Function.Arguments)
+				if total > 1024*1024 {
+					return nil, false
+				}
+				pending[call.ID] = true
+				wire.ToolCalls = append(wire.ToolCalls, &pb.ToolCall{Id: call.ID, Name: call.Function.Name, ArgumentsJson: call.Function.Arguments})
+			}
+			if len(pending) == 0 {
+				expected = "user"
+			} else {
+				expected = "tools"
+			}
+		case "tool":
+			if expected != "tools" || len(message.ToolCalls) != 0 || !pending[message.ToolCallID] {
+				return nil, false
+			}
+			wire.Role = pb.ChatRole_CHAT_ROLE_TOOL
+			delete(pending, message.ToolCallID)
+			if len(pending) == 0 {
+				expected = "assistant_after_tools"
+			}
+		default:
+			return nil, false
+		}
+		result = append(result, wire)
+	}
+	return result, expected == "assistant" || expected == "assistant_after_tools"
+}
+
+func validateResponseFormat(input *responseFormatInput) (pb.ResponseFormat, string, bool) {
+	if input == nil || input.Type == "text" {
+		return pb.ResponseFormat_RESPONSE_FORMAT_TEXT, "", input == nil || input.JSONSchema == nil
+	}
+	if input.Type == "json_object" {
+		return pb.ResponseFormat_RESPONSE_FORMAT_JSON_OBJECT, `{"type":"object"}`, input.JSONSchema == nil
+	}
+	if input.Type != "json_schema" || input.JSONSchema == nil || !validToolName(input.JSONSchema.Name) || len(input.JSONSchema.Schema) == 0 || len(input.JSONSchema.Schema) > 65536 {
+		return 0, "", false
+	}
+	var object map[string]any
+	if json.Unmarshal(input.JSONSchema.Schema, &object) != nil || object == nil {
+		return 0, "", false
+	}
+	return pb.ResponseFormat_RESPONSE_FORMAT_JSON_SCHEMA, string(input.JSONSchema.Schema), true
 }
 
 type apiError struct {
@@ -64,14 +264,9 @@ func setWriteDeadline(w http.ResponseWriter) error {
 
 type textDecoder struct {
 	pending []byte
-	total   int
 }
 
 func (d *textDecoder) push(piece []byte) (string, error) {
-	d.total += len(piece)
-	if d.total > outputLimit {
-		return "", errOutput
-	}
 	d.pending = append(d.pending, piece...)
 	end := 0
 	for end < len(d.pending) {
@@ -118,7 +313,7 @@ func mappedError(err error) (int, errorEnvelope) {
 	}
 }
 
-func chunk(id, model string, created int64, delta map[string]string, reason any) map[string]any {
+func chunk(id, model string, created int64, delta any, reason any) map[string]any {
 	return map[string]any{"id": id, "object": "chat.completion.chunk", "created": created, "model": model,
 		"choices": []any{map[string]any{"index": 0, "delta": delta, "logprobs": nil, "finish_reason": reason}}}
 }
@@ -198,15 +393,27 @@ func (s *Service) chat(w http.ResponseWriter, r *http.Request) {
 	if input.MaxCompletionTokens != nil {
 		limit = *input.MaxCompletionTokens
 	}
-	if input.Model == "" || len(input.Model) > 256 || len(input.Messages) != 1 || input.Messages[0].Role != "user" ||
-		(input.MaxTokens != nil && input.MaxCompletionTokens != nil) || limit < 1 || limit > 512 ||
-		(input.Temperature != nil && *input.Temperature != 0) || (input.N != nil && *input.N != 1) {
-		writeJSON(w, 400, fail("Require one user message, token limit 1..512, temperature 0 and n 1", "invalid_request_error", "unsupported_request"))
-		return
+	messages, validMessages := validateChatMessages(input.Messages)
+	tools, toolChoice, validTools := validateTools(input.Tools, input.ToolChoice)
+	responseFormat, responseSchema, validResponseFormat := validateResponseFormat(input.ResponseFormat)
+	temperature, topP, topK := 0.0, 1.0, 0
+	if input.Temperature != nil {
+		temperature = *input.Temperature
 	}
-	prompt := input.Messages[0].Content
-	if len(prompt) > 65536 || strings.Contains(prompt, "<|im_start|>") || strings.Contains(prompt, "<|im_end|>") {
-		writeJSON(w, 400, fail("Invalid prompt", "invalid_request_error", "invalid_prompt"))
+	if input.TopP != nil {
+		topP = *input.TopP
+	}
+	if input.TopK != nil {
+		topK = *input.TopK
+	}
+	if input.Model == "" || len(input.Model) > 256 || !validMessages || !validTools || !validResponseFormat ||
+		(len(tools) > 0 && responseFormat != pb.ResponseFormat_RESPONSE_FORMAT_TEXT) ||
+		(input.MaxTokens != nil && input.MaxCompletionTokens != nil) || limit < 1 || limit > s.maxOutputTokens ||
+		math.IsNaN(temperature) || math.IsInf(temperature, 0) || temperature < 0 || temperature > 2 ||
+		math.IsNaN(topP) || math.IsInf(topP, 0) || topP <= 0 || topP > 1 || topK < 0 || topK > 100000 ||
+		(input.Seed != nil && (*input.Seed < 0 || *input.Seed > math.MaxUint32)) || !validStops(input.Stop) ||
+		(input.N != nil && *input.N != 1) {
+		writeJSON(w, 400, fail(fmt.Sprintf("Require valid chat, token limit 1..%d, temperature 0..2, top_p (0,1], top_k 0..100000, uint32 seed, at most 4 stop strings, and n 1", s.maxOutputTokens), "invalid_request_error", "unsupported_request"))
 		return
 	}
 	modelID, err := s.readyModel(ctx)
@@ -264,31 +471,121 @@ func (s *Service) chat(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	}
-	var text strings.Builder
-	var utf textDecoder
-	result, err := s.rpc.Generate(ctx, &pb.GenerateRequest{RequestId: id, Prompt: prompt, MaxOutputTokens: uint32(limit)}, func(piece []byte) error {
-		valid, err := utf.push(piece)
+	type toolCallOutput struct {
+		id, name             string
+		arguments            strings.Builder
+		decoder              textDecoder
+		started, syntheticID bool
+	}
+	var text, reasoning strings.Builder
+	toolCalls := []*toolCallOutput{}
+	var contentUTF, reasoningUTF textDecoder
+	outputBytes := 0
+	rpcRequest := &pb.GenerateRequest{RequestId: id, Messages: messages, MaxOutputTokens: uint32(limit), EnableThinking: input.Thinking,
+		Temperature: float32(temperature), TopP: float32(topP), TopK: int32(topK), Stop: []string(input.Stop), Tools: tools, ToolChoice: toolChoice,
+		ResponseFormat: responseFormat, ResponseSchemaJson: responseSchema}
+	if input.Seed != nil {
+		value := uint32(*input.Seed)
+		rpcRequest.Seed = &value
+	}
+	result, err := s.rpc.GeneratePieces(ctx, rpcRequest, func(piece rpcbackend.OutputPiece) error {
+		outputBytes += len(piece.Bytes)
+		if outputBytes > outputLimit {
+			return errOutput
+		}
+		if piece.Channel == pb.TokenChannel_TOKEN_CHANNEL_TOOL_CALL {
+			for len(toolCalls) <= int(piece.ToolCallIndex) {
+				toolCalls = append(toolCalls, &toolCallOutput{})
+			}
+			call := toolCalls[piece.ToolCallIndex]
+			first := !call.started
+			if first {
+				call.id, call.started = piece.ToolCallID, true
+				if call.id == "" {
+					call.id, call.syntheticID = fmt.Sprintf("call_%d_%d", id, piece.ToolCallIndex), true
+				}
+			}
+			idDelta, nameDelta := "", ""
+			if first {
+				idDelta = call.id
+			} else if piece.ToolCallID != "" && piece.ToolCallID != call.id && !call.syntheticID {
+				return errors.New("tool-call ID changed")
+			}
+			if piece.ToolName != "" {
+				if strings.HasPrefix(piece.ToolName, call.name) {
+					nameDelta = strings.TrimPrefix(piece.ToolName, call.name)
+				}
+				call.name = piece.ToolName
+			}
+			arguments, err := call.decoder.push(piece.Bytes)
+			if err != nil {
+				return err
+			}
+			_, _ = call.arguments.WriteString(arguments)
+			if input.Stream && (first || idDelta != "" || nameDelta != "" || arguments != "") {
+				if err := begin(); err != nil {
+					return err
+				}
+				function := map[string]string{}
+				if nameDelta != "" {
+					function["name"] = nameDelta
+				}
+				if arguments != "" {
+					function["arguments"] = arguments
+				}
+				entry := map[string]any{"index": piece.ToolCallIndex, "function": function}
+				if idDelta != "" {
+					entry["id"] = idDelta
+					entry["type"] = "function"
+				}
+				return send(chunk(completionID, input.Model, created, map[string]any{"tool_calls": []any{entry}}, nil))
+			}
+			return nil
+		}
+		decoder := &contentUTF
+		field := "content"
+		builder := &text
+		if piece.Channel == pb.TokenChannel_TOKEN_CHANNEL_REASONING {
+			decoder = &reasoningUTF
+			field = "reasoning_content"
+			builder = &reasoning
+		}
+		valid, err := decoder.push(piece.Bytes)
 		if err != nil {
 			return err
 		}
 		if valid == "" {
 			return nil
 		}
+		_, _ = builder.WriteString(valid)
 		if input.Stream {
 			if err := begin(); err != nil {
 				return err
 			}
-			return send(chunk(completionID, input.Model, created, map[string]string{"content": valid}, nil))
+			return send(chunk(completionID, input.Model, created, map[string]string{field: valid}, nil))
 		}
-		_, err = text.WriteString(valid)
-		return err
+		return nil
 	})
 	observation = &result
-	if err == nil && len(utf.pending) != 0 {
+	if err == nil && (len(contentUTF.pending) != 0 || len(reasoningUTF.pending) != 0) {
 		err = errText
+	}
+	if err == nil {
+		for _, call := range toolCalls {
+			if len(call.decoder.pending) != 0 {
+				err = errText
+				break
+			}
+		}
 	}
 	if err == nil && (!result.TransportComplete || result.Finished == nil) {
 		err = status.Error(codes.DataLoss, "Incomplete inference response")
+	}
+	if err == nil && responseFormat != pb.ResponseFormat_RESPONSE_FORMAT_TEXT {
+		var object map[string]any
+		if json.Unmarshal([]byte(text.String()), &object) != nil || object == nil {
+			err = errors.New("backend returned invalid structured output")
+		}
 	}
 	if err == nil {
 		switch result.Finished.State {
@@ -317,6 +614,8 @@ func (s *Service) chat(w http.ResponseWriter, r *http.Request) {
 	outcome = "completed"
 	if result.Finished.Metrics.OutputTokens >= uint32(limit) {
 		reason = "length"
+	} else if len(toolCalls) > 0 {
+		reason = "tool_calls"
 	}
 	if input.Stream {
 		if begin() != nil {
@@ -328,6 +627,17 @@ func (s *Service) chat(w http.ResponseWriter, r *http.Request) {
 		_ = send("[DONE]")
 		return
 	}
+	message := map[string]any{"role": "assistant", "content": text.String()}
+	if input.Thinking {
+		message["reasoning_content"] = reasoning.String()
+	}
+	if len(toolCalls) > 0 {
+		calls := make([]any, 0, len(toolCalls))
+		for _, call := range toolCalls {
+			calls = append(calls, map[string]any{"id": call.id, "type": "function", "function": map[string]string{"name": call.name, "arguments": call.arguments.String()}})
+		}
+		message["tool_calls"] = calls
+	}
 	writeJSON(w, 200, map[string]any{"id": completionID, "object": "chat.completion", "created": created, "model": input.Model,
-		"choices": []any{map[string]any{"index": 0, "message": map[string]string{"role": "assistant", "content": text.String()}, "logprobs": nil, "finish_reason": reason}}})
+		"choices": []any{map[string]any{"index": 0, "message": message, "logprobs": nil, "finish_reason": reason}}})
 }
