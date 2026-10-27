@@ -23,6 +23,31 @@ tail-latency or thermal claim. Raw JSON/CSV results stay ignored under
 `benchmarks/results/`; the runner records target/draft identity, runtime revisions,
 configuration, request correlations, scheduler samples and memory snapshots.
 
+## LFM3 queue-versus-continuous comparison
+
+The exact official Liquid AI `LFM3-1.7B-QAD-Q4_0.gguf` artifact with SHA-256
+`43a7d09a0e9cba91b63eb7052488b9564569bddfd65754d2e426465e572a7452`
+first passed the native two-sequence qualification. The runner now verifies that
+private path/size/mtime receipt before enabling generic continuous mode.
+
+```sh
+sh scripts/test-native-batching.sh /absolute/path/LFM3-1.7B-QAD-Q4_0.gguf
+.venv/bin/python benchmarks/runners/batching_comparison.py \
+  /absolute/path/LFM3-1.7B-QAD-Q4_0.gguf \
+  --config benchmarks/workloads/lfm3-comparison.json
+```
+
+The bounded workload used 8,192 configured context tokens, a 512-token runtime output
+ceiling, 30-token observed completions, two repetitions each at concurrency one and
+two, and one warmup per mode. Every request completed and every output digest matched.
+Single-request aggregate throughput was 68.29 tok/s in queue mode and 68.28 tok/s in
+continuous mode. At concurrency two, queue mode measured 69.37 tok/s, 459.2 ms median
+TTFT and 848.9 ms median latency with one executing/one waiting; continuous measured
+110.24 tok/s, 81.9 ms TTFT and 527.8 ms latency with two executing/none waiting.
+
+This is a small scheduling comparison on one inspected M4 Air. It is not a model
+quality, thermal, long-context, stress, P95/P99 or universal LFM3 performance claim.
+
 Phase 4's public-API concurrency harness and its distinct client/scheduler metric
 boundaries are documented in [concurrency-benchmarking.md](concurrency-benchmarking.md).
 

@@ -13,6 +13,10 @@ model=${PILOTLLAMA_MODEL:-}
 model_id=${PILOTLLAMA_MODEL_ID:-}
 batching=${PILOTLLAMA_BATCHING:-}
 draft_model=${PILOTLLAMA_DRAFT_MODEL:-}
+model_selected=false
+[ -n "$model" ] && model_selected=true
+draft_selection=auto
+[ -n "$draft_model" ] && draft_selection=explicit
 context_tokens=${PILOTLLAMA_CONTEXT_TOKENS:-}
 max_output_tokens=${PILOTLLAMA_MAX_OUTPUT_TOKENS:-}
 listen=${PILOTLLAMA_LISTEN:-127.0.0.1:8080}
@@ -23,16 +27,22 @@ usage() {
     echo "Usage: ./scripts/start.sh [--model ABSOLUTE_GGUF] [--model-id ID]" >&2
     echo "                          [--batching queue|continuous] [--listen 127.0.0.1:PORT]" >&2
     echo "                          [--context-tokens N] [--max-output-tokens N]" >&2
-    echo "                          [--draft-model ABSOLUTE_DFLASH_GGUF]" >&2
+    echo "                          [--draft-model ABSOLUTE_DFLASH_GGUF | --no-draft-model]" >&2
 }
 
 while [ "$#" -gt 0 ]; do
+    if [ "$1" = "--no-draft-model" ]; then
+        draft_model=
+        draft_selection=disabled
+        shift
+        continue
+    fi
     [ "$#" -ge 2 ] || { usage; exit 2; }
     case "$1" in
-        --model) model=$2 ;;
+        --model) model=$2; model_selected=true ;;
         --model-id) model_id=$2 ;;
         --batching) batching=$2 ;;
-        --draft-model) draft_model=$2 ;;
+        --draft-model) draft_model=$2; draft_selection=explicit ;;
         --listen) listen=$2 ;;
         --context-tokens) context_tokens=$2 ;;
         --max-output-tokens) max_output_tokens=$2 ;;
@@ -66,11 +76,17 @@ if [ -f "$state/service.pid" ]; then
     esac
 fi
 
-if [ -z "$model" ] && [ -f "$state/model.path" ]; then model=$(cat "$state/model.path"); fi
+saved_model=
+if [ -f "$state/model.path" ]; then saved_model=$(cat "$state/model.path"); fi
+if [ -z "$model" ]; then model=$saved_model; fi
 if [ -z "$model_id" ] && [ -f "$state/model.id" ]; then model_id=$(cat "$state/model.id"); fi
 if [ -z "$batching" ] && [ -f "$state/batching" ]; then batching=$(cat "$state/batching"); fi
 if [ -z "$context_tokens" ] && [ -f "$state/context.tokens" ]; then context_tokens=$(cat "$state/context.tokens"); fi
-if [ -z "$draft_model" ] && [ -f "$state/draft-model.path" ]; then draft_model=$(cat "$state/draft-model.path"); fi
+if [ "$draft_selection" = auto ] &&
+   { [ "$model_selected" = false ] || [ -z "$saved_model" ] || [ "$model" = "$saved_model" ]; } &&
+   [ -f "$state/draft-model.path" ]; then
+    draft_model=$(cat "$state/draft-model.path")
+fi
 if [ -z "$max_output_tokens" ] && [ -f "$state/max-output.tokens" ]; then max_output_tokens=$(cat "$state/max-output.tokens"); fi
 [ -n "$model_id" ] || model_id=local-model
 [ -n "$batching" ] || batching=queue

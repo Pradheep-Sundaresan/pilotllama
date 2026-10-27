@@ -21,6 +21,7 @@ SPEC = importlib.util.spec_from_file_location("concurrency_baseline", BASELINE_P
 baseline = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(baseline)
 DEFAULT_CONFIG = ROOT / "benchmarks/workloads/batching-comparison.json"
+QUALIFICATION = ROOT / "build" / "pilotllama" / "continuous-qualified"
 
 
 def file_sha256(path):
@@ -28,6 +29,19 @@ def file_sha256(path):
     with path.open("rb") as stream:
         for block in iter(lambda: stream.read(1024 * 1024), b""): digest.update(block)
     return digest.hexdigest()
+
+
+def require_exact_qualification(model, draft=None):
+    if not QUALIFICATION.is_file() or QUALIFICATION.is_symlink():
+        raise ValueError("Exact-file continuous qualification is required before comparison")
+    lines = QUALIFICATION.read_text().splitlines()
+    fingerprint = f"{model.stat().st_size}:{int(model.stat().st_mtime)}"
+    if len(lines) < 2 or lines[0] != str(model) or lines[1] != fingerprint:
+        raise ValueError("Continuous qualification does not match the unchanged target model")
+    if draft is not None:
+        draft_fingerprint = f"{draft.stat().st_size}:{int(draft.stat().st_mtime)}"
+        if len(lines) < 4 or lines[2] != str(draft) or lines[3] != draft_fingerprint:
+            raise ValueError("Continuous qualification does not match the unchanged draft model")
 
 
 def stop_process(process):
@@ -105,6 +119,7 @@ def write_comparison(path, manifests):
 def run(model, config, output, api, server, draft=None):
     if output.exists():
         raise ValueError("Output directory must not already exist")
+    require_exact_qualification(model, draft)
     output.mkdir(parents=True)
     token = secrets.token_urlsafe(32)
     env = os.environ.copy()
@@ -126,6 +141,8 @@ def run(model, config, output, api, server, draft=None):
                     str(api), "--listen", "127.0.0.1:18080", "--backend-exec", str(server),
                     "--model", str(model), "--model-id", config["model"],
                     "--backend-batching", "continuous" if draft else mode,
+                    "--context-tokens", str(config.get("runtime_declared", {}).get("context_tokens", 4096)),
+                    "--max-output-tokens", str(config.get("runtime_declared", {}).get("max_output_tokens", 512)),
                     "--auth-token-env", "INFERNO_PHASE6C_TOKEN",
                     "--request-timeout", "120s", "--rate-per-minute", "0",
                     "--backend-state-dir", str(output / f"state-{mode}"),
@@ -133,6 +150,9 @@ def run(model, config, output, api, server, draft=None):
                 if draft:
                     command.append("--backend-qualify-continuous")
                     if mode == "dflash": command.extend(["--draft-model", str(draft)])
+                elif mode == "continuous":
+                    # The caller must run the exact-file native qualification first.
+                    command.append("--backend-qualify-continuous")
                 process = subprocess.Popen(command, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
                 try:
                     wait_ready(base_url, time.monotonic() + 45)

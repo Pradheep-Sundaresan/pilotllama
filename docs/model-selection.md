@@ -55,5 +55,26 @@ GiB) for the short 4096-context smoke test; this does not establish a bound for
 other workloads. The GGUF has no chat template, so the smoke script supplies the
 single-user, no-tools, thinking-disabled prompt structure observed in NVIDIA's
 [tokenizer configuration](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16/blob/main/tokenizer_config.json).
+
+## Liquid AI LFM3-1.7B evidence — 2026-10-28
+
+The user-supplied official `LFM3-1.7B-QAD-Q4_0.gguf` was tested with pinned
+llama.cpp commit `19cce6919992fdffd92e0ac152caaf1e2b8f254e`. PilotLlama detected a
+decoder-only `lfm3` architecture, embedded template, 1,728,801,600 parameters and a
+declared 262,144-token trained context. The service was configured at 8,192 context
+tokens and a 1,024-token output ceiling; the model maximum was not allocated.
+
+The bounded Driving Test passed basic generation, multi-turn history, seeded sampling
+and typed tool calling; strict structured JSON failed, so the exact artifact is graded
+`compatible`, not universally verified. Native qualification passed two-sequence
+continuous generation, cancellation isolation and recovery.
+
+An identical bounded comparison produced the same output digest in every completed
+request. Single-request throughput was 68.29 tok/s in queue mode and 68.28 tok/s in
+continuous mode. At concurrency two, queue mode measured 69.37 aggregate tok/s with
+one executing and one waiting; continuous mode measured 110.24 aggregate tok/s with
+two executing and none waiting. Median two-user latency changed from 848.9 ms to
+527.8 ms. Results apply only to this artifact, runtime, workload and inspected M4 Air.
+No model weights are distributed; LFM3 remains under Liquid AI's LFM Open License v1.0.
 The exact smoke input is preserved in the script. Original weight/conversion
 revision provenance remains unknown.

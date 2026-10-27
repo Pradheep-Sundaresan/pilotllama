@@ -40,5 +40,6 @@ repository; see `NOTICE`.
 
 ## Project license
 
-A top-level project license has not yet been selected. That choice is a release
-blocker and is intentionally not inferred from third-party licenses.
+PilotLlama source and original project artwork are licensed under Apache License 2.0;
+see `LICENSE` and `NOTICE`. This license does not cover third-party dependencies or
+user-supplied models, which remain governed by their respective upstream terms.

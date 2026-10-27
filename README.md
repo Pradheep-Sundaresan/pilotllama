@@ -129,6 +129,10 @@ qualification with `scripts/test-native-batching.sh`:
   --draft-model /absolute/path/dflash.gguf --batching continuous
 ```
 
+Use `--no-draft-model` to run target-only and clear a saved draft selection. Selecting
+a different target model no longer carries a previously saved draft forward unless
+the operator explicitly supplies `--draft-model` again.
+
 Open `http://127.0.0.1:8080/`. Later starts reuse the saved model selection:
 
 ```sh
@@ -252,6 +256,7 @@ can use multi-turn chat, bounded tools and structured JSON.
 | --- | --- | --- | --- | --- | --- | --- |
 | Nemotron Nano 4B, Q4_K_M | verified JSON/SSE | unavailable with its template-less fallback | unavailable | unavailable | unqualified | built-in verified |
 | Nemotron 3.5 Bolt E4B, Q4_K_M | verified; DFlash pair qualified | verified | detected | verified | bounded probe failed | exact file qualified |
+| Liquid AI LFM3-1.7B, QAD-Q4_0 | verified | verified | detected | verified | bounded probe failed | exact file qualified |
 
 These are results for the exact local GGUFs and pinned runtime—not promises for every
 model, quantization or machine. Bolt passed 4/5 bounded Driving Test checks; its strict
@@ -266,6 +271,13 @@ A bounded two-client continuous comparison completed 4/4 requests in both modes 
 identical output digests. DFlash measured 24.49% acceptance, but throughput was 15.96
 versus 16.53 tok/s target-only and median TTFT was higher. PilotLlama therefore makes
 no general continuous-DFlash speedup claim. [Method and evidence](docs/benchmarking.md#continuous-dflash-comparison).
+
+The exact LFM3 QAD-Q4_0 artifact passed 4/5 Driving Test checks. In a bounded identical
+30-token-output comparison on the inspected M4 Air, single-request queue and continuous
+throughput were effectively equal (68.29 versus 68.28 tok/s). At concurrency two,
+aggregate throughput was 69.37 tok/s in queue mode and 110.24 tok/s in continuous mode;
+median latency fell from 848.9 ms to 527.8 ms, and all completed outputs had identical
+digests. This is exact-artifact scheduling evidence, not a universal LFM3 performance claim.
 
 ## Components
 
