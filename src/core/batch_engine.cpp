@@ -42,6 +42,7 @@ struct ContinuousBatchEngine::ActiveSlot {
     std::atomic<bool> delivery_done{true};
     std::mutex delivery_error_mutex;
     std::string delivery_error;
+    std::optional<SpeculativeMetrics> speculative_metrics;
 };
 
 struct ContinuousBatchEngine::RetiringSlot {
@@ -241,6 +242,15 @@ void ContinuousBatchEngine::reap_deliveries(bool join_all) {
         advance(*slot.item->lifecycle, slot.result.state);
         slot.item->timings.finished = RequestClock::now();
         slot.result.metrics = summarize_timings(slot.item->timings);
+        if (slot.speculative_metrics) {
+            slot.result.metrics.speculative_drafted_tokens = slot.speculative_metrics->drafted_tokens;
+            slot.result.metrics.speculative_accepted_tokens = slot.speculative_metrics->accepted_tokens;
+            if (slot.speculative_metrics->drafted_tokens > 0) {
+                slot.result.metrics.speculative_acceptance_rate =
+                    static_cast<double>(slot.speculative_metrics->accepted_tokens) /
+                    slot.speculative_metrics->drafted_tokens;
+            }
+        }
         slot.item->completion.set_value(std::move(slot.result));
         retiring_.erase(retiring_.begin() + static_cast<std::ptrdiff_t>(i));
     }
@@ -350,6 +360,11 @@ void ContinuousBatchEngine::work() {
                         throw std::runtime_error("Token consumer exceeded bounded delivery capacity");
                     }
                     advances = false;
+                }
+                if (match->speculative_metrics) {
+                    if (!slot.speculative_metrics) slot.speculative_metrics = SpeculativeMetrics{};
+                    slot.speculative_metrics->drafted_tokens += match->speculative_metrics->drafted_tokens;
+                    slot.speculative_metrics->accepted_tokens += match->speculative_metrics->accepted_tokens;
                 }
                 slot.item->control->checkpoint();
                 if (!match->error.empty()) retire(i, RequestState::failed, match->error);

@@ -3,6 +3,8 @@
 #include "inferno/nemotron_prompt.hpp"
 #include "chat.h"
 #include "common.h"
+#include "sampling.h"
+#include "speculative.h"
 #include "llama-ext.h"
 #include "llama.h"
 #include "ggml-backend.h"
@@ -358,7 +360,7 @@ std::vector<ParsedPiece> finish_parser(PreparedPrompt& prepared) {
 }
 
 struct BackendSession {
-    BackendSession() { llama_backend_init(); }
+    BackendSession() { common_init(); llama_backend_init(); }
     ~BackendSession() { llama_backend_free(); }
 };
 
@@ -430,9 +432,37 @@ public:
         params.n_threads = config.threads;
         params.n_threads_batch = config.threads;
         params.n_seq_max = 1;
+        if (!config.draft_model_path.empty()) {
+            params.n_rs_seq = config.draft_tokens;
+            params.n_outputs_max = config.draft_tokens + 1;
+            params.n_outputs_max_per_seq = config.draft_tokens + 1;
+        }
         context_.reset(llama_init_from_model(model_.get(), params));
         if (!context_) {
             throw std::runtime_error("llama.cpp could not create the execution context");
+        }
+        if (!config.draft_model_path.empty()) {
+            common_params draft;
+            draft.model.path = config.path;
+            draft.n_ctx = config.context_tokens;
+            draft.n_batch = std::max(config.batch_tokens, config.draft_tokens + 1);
+            draft.n_ubatch = draft.n_batch;
+            draft.n_parallel = 1;
+            draft.n_gpu_layers = config.gpu_layers;
+            draft.cpuparams.n_threads = config.threads;
+            draft.cpuparams_batch.n_threads = config.threads;
+            draft.speculative.types = {COMMON_SPECULATIVE_TYPE_DRAFT_DFLASH};
+            draft.speculative.draft.mparams.path = config.draft_model_path;
+            draft.speculative.draft.n_max = static_cast<std::int32_t>(config.draft_tokens);
+            draft.speculative.draft.n_gpu_layers = config.gpu_layers;
+            auto draft_params = common_base_params_to_speculative(draft);
+            speculative_init_ = common_speculative_init_from_params(draft_params, model_.get(), context_.get());
+            if (!speculative_init_ || !speculative_init_->model() || !speculative_init_->context()) {
+                throw std::runtime_error("llama.cpp could not initialize the DFlash draft model");
+            }
+            draft.speculative.draft.ctx_tgt = context_.get();
+            draft.speculative.draft.ctx_dft = speculative_init_->context();
+            speculative_params_ = std::move(draft.speculative);
         }
         initialize_memory_snapshot();
         record_process_memory(MemorySamplePoint::backend_ready);
@@ -450,6 +480,13 @@ public:
 
     std::optional<ModelCapabilities> model_capabilities() const override {
         return prompt_formatter_.capabilities;
+    }
+
+    std::optional<SpeculativeMetrics> take_speculative_metrics() override {
+        std::lock_guard lock(memory_mutex_);
+        auto result = speculative_metrics_;
+        speculative_metrics_.reset();
+        return result;
     }
 
     void generate(const GenerationRequest& request, const DecodeStarted& decode_started,
@@ -476,8 +513,12 @@ public:
                            static_cast<int32_t>(tokens.size()), true, true) != static_cast<int32_t>(count)) {
             throw std::runtime_error("Prompt tokenization failed");
         }
-        ClearState reset{context_.get(), [this](MemorySamplePoint point) { record_process_memory(point); }};
 		const auto grammar = prepared.session && (request.response_format != ResponseFormat::text || request.tool_choice == ToolChoice::required) ? prepared.session->grammar() : std::string_view{};
+		if (!config_.draft_model_path.empty()) {
+            generate_speculative(request, prepared, tokens, grammar, decode_started, emit_token, checkpoint);
+            return;
+        }
+		ClearState reset{context_.get(), [this](MemorySamplePoint point) { record_process_memory(point); }};
 		auto sampler = make_sampler(request, vocab, grammar);
         Owned<llama_batch_ext, llama_batch_ext_free> batch(llama_batch_ext_init(context_.get()), llama_batch_ext_free);
         if (!sampler || !batch) {
@@ -549,6 +590,160 @@ public:
     }
 
 private:
+    void generate_speculative(const GenerationRequest& request, PreparedPrompt& prepared,
+                              const std::vector<llama_token>& tokens, std::string_view grammar,
+                              const DecodeStarted& decode_started, const TokenCallback& emit_token,
+                              const Checkpoint& checkpoint) {
+        if (tokens.empty()) throw std::runtime_error("DFlash requires a non-empty prompt");
+        {
+            std::lock_guard lock(memory_mutex_);
+            speculative_metrics_ = SpeculativeMetrics{};
+        }
+        const auto* vocab = llama_model_get_vocab(model_.get());
+        common_params_sampling sampling;
+        sampling.seed = request.seed.value_or(LLAMA_DEFAULT_SEED);
+        sampling.top_k = request.top_k;
+        sampling.top_p = request.top_p;
+        sampling.min_p = 0.0F;
+        sampling.temp = request.temperature;
+        if (!grammar.empty()) sampling.grammar = {COMMON_GRAMMAR_TYPE_USER, std::string(grammar)};
+        common_sampler_ptr sampler(common_sampler_init(model_.get(), sampling));
+        common_speculative_ptr spec(common_speculative_init(speculative_params_, 1));
+        if (!sampler || !spec) throw std::runtime_error("Could not initialize DFlash generation");
+
+        auto* draft_context = speculative_init_->context();
+        struct ResetBoth {
+            llama_context* target;
+            llama_context* draft;
+            std::function<void(MemorySamplePoint)> record;
+            ~ResetBoth() noexcept {
+                try { record(MemorySamplePoint::request_complete_before_cleanup); } catch (...) {}
+                llama_synchronize(target);
+                llama_synchronize(draft);
+                llama_memory_clear(llama_get_memory(target), true);
+                llama_memory_clear(llama_get_memory(draft), true);
+                try { record(MemorySamplePoint::request_complete_after_cleanup); } catch (...) {}
+            }
+        } reset{context_.get(), draft_context,
+                [this](MemorySamplePoint point) { record_process_memory(point); }};
+
+        constexpr llama_seq_id sequence = 0;
+        // Capability probing clears context memory; it must happen before prompt evaluation.
+        const bool checkpoint_target = common_context_can_seq_rm(context_.get()) == COMMON_CONTEXT_SEQ_RM_TYPE_FULL;
+        const bool checkpoint_draft = common_context_can_seq_rm(draft_context) == COMMON_CONTEXT_SEQ_RM_TYPE_FULL;
+        llama_tokens prompt(tokens.begin(), tokens.end() - 1);
+        prompt.reserve(config_.context_tokens);
+        for (std::size_t offset = 0; offset < prompt.size();) {
+            checkpoint();
+            common_batch batch(context_.get());
+            const auto end = std::min(prompt.size(), offset + config_.batch_tokens);
+            for (auto i = offset; i < end; ++i) batch.add(prompt[i], static_cast<llama_pos>(i), sequence, false);
+            if (llama_process(context_.get(), LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0 ||
+                !common_speculative_process(spec.get(), batch)) {
+                throw std::runtime_error("DFlash prompt evaluation failed");
+            }
+            offset = end;
+        }
+        llama_token last = tokens.back();
+        int past = static_cast<int>(prompt.size());
+        common_speculative_begin(spec.get(), sequence, prompt);
+        common_batch target_batch(context_.get());
+        common_prompt_checkpoint saved;
+        llama_tokens draft;
+        StopFilter stop_filter(request.stop);
+        bool stopped = false;
+        bool eos = false;
+        std::uint32_t generated = 0;
+        decode_started();
+        record_process_memory(MemorySamplePoint::prefill_complete);
+
+        while (generated < request.max_output_tokens && !stopped && !eos) {
+            checkpoint();
+            bool drafted_now = false;
+            if (draft.empty()) {
+                saved.update_pos(prompt.size(), llama_memory_seq_pos_min(llama_get_memory(context_.get()), sequence),
+                                 llama_memory_seq_pos_max(llama_get_memory(context_.get()), sequence));
+                if (checkpoint_draft) saved.update_dft(draft_context, sequence, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+                const auto remaining = request.max_output_tokens - generated;
+                const auto room = config_.context_tokens - static_cast<std::uint32_t>(past) - 1;
+                const auto maximum = std::min({config_.draft_tokens, remaining > 0 ? remaining - 1 : 0U, room});
+                common_speculative_get_draft_params(spec.get(), sequence) = {
+                    .drafting = true, .n_max = static_cast<std::int32_t>(maximum), .pos0 = past,
+                    .id_last = last, .prompt = &prompt, .result = &draft,
+                    .temp = request.temperature, .seed = sampling.seed};
+                common_speculative_draft(spec.get());
+                drafted_now = true;
+                if (!draft.empty() && checkpoint_target)
+                    saved.update_tgt(context_.get(), sequence, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+                if (checkpoint_draft) {
+                    if (!saved.load_dft(draft_context, sequence, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY))
+                        throw std::runtime_error("Could not restore DFlash checkpoint");
+                }
+                llama_memory_seq_rm(llama_get_memory(draft_context), sequence, saved.pos_max + 1, -1);
+            }
+
+            target_batch.clear();
+            target_batch.add(last, past++, sequence, true);
+            for (std::size_t i = 0; i < draft.size(); ++i)
+                target_batch.add(draft[i], past + static_cast<llama_pos>(i), sequence, true);
+            if (llama_process(context_.get(), LLAMA_PROCESS_TYPE_DECODE, target_batch.get()) != 0 ||
+                !common_speculative_process(spec.get(), target_batch))
+                throw std::runtime_error("DFlash verification failed");
+            auto sampler_saved = checkpoint_target ? common_sampler_ptr(common_sampler_clone(sampler.get())) : nullptr;
+            const auto draft_count = draft.size();
+            auto accepted = common_sampler_sample_and_accept_n(sampler.get(), context_.get(), draft);
+            if (drafted_now) {
+                std::lock_guard lock(memory_mutex_);
+                speculative_metrics_->drafted_tokens += draft_count;
+                speculative_metrics_->accepted_tokens += accepted.size() - 1;
+            }
+            if (checkpoint_target && accepted.size() - 1 < draft_count) {
+                draft = std::move(accepted);
+                if (!saved.load_tgt(context_.get(), sequence, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) ||
+                    !saved.load_dft(draft_context, sequence, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY))
+                    throw std::runtime_error("Could not restore speculative checkpoint");
+                llama_memory_seq_rm(llama_get_memory(context_.get()), sequence, saved.pos_max + 1, -1);
+                llama_memory_seq_rm(llama_get_memory(draft_context), sequence, saved.pos_max + 1, -1);
+                prompt.resize(saved.n_tokens);
+                sampler = std::move(sampler_saved);
+                past = static_cast<int>(prompt.size());
+                continue;
+            }
+            common_speculative_accept(spec.get(), sequence, static_cast<std::uint16_t>(accepted.size() - 1));
+            past += static_cast<int>(accepted.size() - 1);
+            for (const auto token : accepted) {
+                prompt.push_back(last);
+                last = token;
+                if (llama_vocab_is_eog(vocab, token)) { eos = true; break; }
+                emit_token({std::string{}, OutputChannel::content, true});
+                for (auto& output : feed_parser(prepared, token_piece(vocab, token), token)) {
+                    if (output.channel == OutputChannel::tool_call) {
+                        for (auto& filtered : stop_filter.finish()) emit_token({filtered.bytes, filtered.channel, false});
+                        emit_token({output.bytes, output.channel, false, output.tool_call_index, output.tool_call_id, output.tool_name});
+                    } else for (auto& filtered : stop_filter.push(std::move(output), stopped))
+                        emit_token({filtered.bytes, filtered.channel, false});
+                    if (stopped) break;
+                }
+                if (++generated >= request.max_output_tokens || stopped) break;
+                checkpoint();
+            }
+            draft.clear();
+            llama_memory_seq_rm(llama_get_memory(context_.get()), sequence, past, -1);
+            llama_memory_seq_rm(llama_get_memory(draft_context), sequence, past, -1);
+        }
+        if (!stopped) {
+            for (auto& output : finish_parser(prepared)) {
+                if (output.channel == OutputChannel::tool_call) {
+                    for (auto& filtered : stop_filter.finish()) emit_token({filtered.bytes, filtered.channel, false});
+                    emit_token({output.bytes, output.channel, false, output.tool_call_index, output.tool_call_id, output.tool_name});
+                } else for (auto& filtered : stop_filter.push(std::move(output), stopped))
+                    emit_token({filtered.bytes, filtered.channel, false});
+                if (stopped) break;
+            }
+            if (!stopped) for (auto& output : stop_filter.finish()) emit_token({output.bytes, output.channel, false});
+        }
+    }
+
     static std::size_t sample_index(MemorySamplePoint point) {
         return static_cast<std::size_t>(point) - 1;
     }
@@ -564,26 +759,38 @@ private:
         memory_snapshot_.configured_batch_tokens = config_.batch_tokens;
         memory_snapshot_.configured_sequences = 1;
         memory_snapshot_.configured_gpu_layers = config_.gpu_layers;
-        memory_snapshot_.model_tensor_bytes = llama_model_size(model_.get());
+        std::uint64_t tensor_bytes = llama_model_size(model_.get());
+        if (speculative_init_ && speculative_init_->model()) {
+            const auto draft_bytes = llama_model_size(speculative_init_->model());
+            if (draft_bytes <= std::numeric_limits<std::uint64_t>::max() - tensor_bytes) tensor_bytes += draft_bytes;
+        }
+        memory_snapshot_.model_tensor_bytes = tensor_bytes;
         const auto breakdown = llama_get_memory_breakdown(context_.get());
+        const auto draft_breakdown = speculative_init_ && speculative_init_->context()
+            ? llama_get_memory_breakdown(speculative_init_->context()) : decltype(breakdown){};
         constexpr std::size_t row_limit = 32;
-        if (breakdown.size() > row_limit) return;
+        if (breakdown.size() + draft_breakdown.size() > row_limit) return;
         std::uint64_t model_total = 0, context_total = 0, compute_total = 0;
         auto add = [](std::uint64_t& total, std::size_t value) {
             if (value > std::numeric_limits<std::uint64_t>::max() - total) return false;
             total += static_cast<std::uint64_t>(value);
             return true;
         };
-        for (const auto& [type, bytes] : breakdown) {
-            const char* raw_name = ggml_backend_buft_name(type);
-            std::string name = raw_name ? raw_name : "unknown";
-            if (name.size() > 128) name.resize(128);
-            if (!add(model_total, bytes.model) || !add(context_total, bytes.context) ||
-                !add(compute_total, bytes.compute)) {
-                memory_snapshot_.llama_buffers.clear();
-                return;
+        auto append = [&](const auto& rows, std::string_view prefix) {
+            for (const auto& [type, bytes] : rows) {
+                const char* raw_name = ggml_backend_buft_name(type);
+                std::string name(prefix);
+                name += raw_name ? raw_name : "unknown";
+                if (name.size() > 128) name.resize(128);
+                if (!add(model_total, bytes.model) || !add(context_total, bytes.context) ||
+                    !add(compute_total, bytes.compute)) return false;
+                memory_snapshot_.llama_buffers.push_back({std::move(name), bytes.model, bytes.context, bytes.compute});
             }
-            memory_snapshot_.llama_buffers.push_back({std::move(name), bytes.model, bytes.context, bytes.compute});
+            return true;
+        };
+        if (!append(breakdown, "") || !append(draft_breakdown, "draft:")) {
+            memory_snapshot_.llama_buffers.clear();
+            return;
         }
         memory_snapshot_.llama_model_allocated_bytes = model_total;
         memory_snapshot_.llama_context_allocated_bytes = context_total;
@@ -591,6 +798,8 @@ private:
     }
 
     LlamaModelConfig config_;
+    common_params_speculative speculative_params_;
+    common_speculative_init_result_ptr speculative_init_;
     BackendSession session_;
     Owned<llama_model, llama_model_free> model_{nullptr, llama_model_free};
     Owned<llama_context, llama_free> context_{nullptr, llama_free};
@@ -598,6 +807,7 @@ private:
     mutable std::mutex memory_mutex_;
     MemorySnapshot memory_snapshot_;
     std::array<std::optional<ProcessMemorySample>, 5> process_samples_;
+    std::optional<SpeculativeMetrics> speculative_metrics_;
 };
 
 class LlamaBatchExecutor final : public BatchExecutor {
@@ -628,8 +838,39 @@ public:
         params.n_threads = config.threads;
         params.n_threads_batch = config.threads;
         params.n_seq_max = 2;
+        if (!config.draft_model_path.empty()) {
+            params.n_rs_seq = config.draft_tokens;
+            params.n_outputs_max = 2 * (config.draft_tokens + 1);
+            params.n_outputs_max_per_seq = config.draft_tokens + 1;
+        }
         context_.reset(llama_init_from_model(model_.get(), params));
         if (!context_) throw std::runtime_error("llama.cpp could not create the two-sequence context");
+        if (!config.draft_model_path.empty()) {
+            common_params draft;
+            draft.model.path = config.path;
+            draft.n_ctx = config.context_tokens;
+            draft.n_batch = std::max<std::uint32_t>(config.batch_tokens, 2 * (config.draft_tokens + 1));
+            draft.n_ubatch = draft.n_batch;
+            draft.n_parallel = 2;
+            draft.n_gpu_layers = config.gpu_layers;
+            draft.cpuparams.n_threads = config.threads;
+            draft.cpuparams_batch.n_threads = config.threads;
+            draft.speculative.types = {COMMON_SPECULATIVE_TYPE_DRAFT_DFLASH};
+            draft.speculative.draft.mparams.path = config.draft_model_path;
+            draft.speculative.draft.n_max = static_cast<std::int32_t>(config.draft_tokens);
+            draft.speculative.draft.n_gpu_layers = config.gpu_layers;
+            auto init_params = common_base_params_to_speculative(draft);
+            speculative_init_ = common_speculative_init_from_params(init_params, model_.get(), context_.get());
+            if (!speculative_init_ || !speculative_init_->model() || !speculative_init_->context())
+                throw std::runtime_error("llama.cpp could not initialize the two-sequence DFlash model");
+            draft.speculative.draft.ctx_tgt = context_.get();
+            draft.speculative.draft.ctx_dft = speculative_init_->context();
+            speculative_params_ = std::move(draft.speculative);
+            speculative_.reset(common_speculative_init(speculative_params_, 2));
+            if (!speculative_) throw std::runtime_error("Could not initialize two-sequence DFlash state");
+            checkpoint_target_ = common_context_can_seq_rm(context_.get()) == COMMON_CONTEXT_SEQ_RM_TYPE_FULL;
+            checkpoint_draft_ = common_context_can_seq_rm(speculative_init_->context()) == COMMON_CONTEXT_SEQ_RM_TYPE_FULL;
+        }
         batch_.reset(llama_batch_ext_init(context_.get()));
         if (!batch_) throw std::runtime_error("Could not allocate the shared inference batch");
         initialize_memory_snapshot();
@@ -671,7 +912,20 @@ public:
         }
 		state.prepared = std::move(prepared);
 		const auto grammar = state.prepared.session && (request.response_format != ResponseFormat::text || request.tool_choice == ToolChoice::required) ? state.prepared.session->grammar() : std::string_view{};
-		state.sampler = make_sampler(request, vocab, grammar);
+        state.sampler = make_sampler(request, vocab, grammar);
+        if (speculative_) {
+            common_params_sampling sampling;
+            sampling.seed = request.seed.value_or(LLAMA_DEFAULT_SEED);
+            sampling.top_k = request.top_k; sampling.top_p = request.top_p; sampling.min_p = 0.0F; sampling.temp = request.temperature;
+            if (!grammar.empty()) sampling.grammar = {COMMON_GRAMMAR_TYPE_USER, std::string(grammar)};
+            state.speculative_sampler.reset(common_sampler_init(model_.get(), sampling));
+            if (!state.speculative_sampler) throw std::runtime_error("Could not allocate speculative sequence sampler");
+            state.last = state.tokens.back();
+            state.tokens.pop_back();
+            state.prompt = state.tokens;
+            state.prompt.reserve(config_.context_tokens / 2);
+            state.past = static_cast<int>(state.prompt.size());
+        }
         state.stop_filter = StopFilter(request.stop);
         if (!state.sampler) throw std::runtime_error("Could not allocate sequence sampler");
         const auto count = state.tokens.size();
@@ -681,6 +935,7 @@ public:
 
     std::vector<BatchStepEvent> step(std::span<const SequenceId> sequences,
                                      std::size_t prefill_chunk_tokens) override {
+        if (speculative_) return step_speculative(sequences, prefill_chunk_tokens);
         if (sequences.empty() || sequences.size() > 2 || prefill_chunk_tokens == 0 ||
             prefill_chunk_tokens > config_.batch_tokens) {
             throw std::invalid_argument("Invalid native batch turn");
@@ -793,12 +1048,168 @@ public:
         llama_synchronize(context_.get());
         const bool removed = llama_memory_seq_rm(llama_get_memory(context_.get()),
             static_cast<llama_seq_id>(sequence), -1, -1);
+        if (speculative_init_) llama_memory_seq_rm(llama_get_memory(speculative_init_->context()),
+            static_cast<llama_seq_id>(sequence), -1, -1);
         states_.erase(found);
         record_process_memory(MemorySamplePoint::request_complete_after_cleanup);
         return removed;
     }
 
 private:
+    struct State;
+    void emit_speculative_token(State& state, BatchStepEvent& event, const llama_vocab* vocab) {
+        if (!state.speculative_started) {
+            state.speculative_started = true;
+            event.decode_started = true;
+            record_process_memory(MemorySamplePoint::prefill_complete);
+        }
+        if (state.accepted.empty()) return;
+        const auto token = state.accepted.front(); state.accepted.pop_front();
+        auto append_output = [&](ParsedPiece output) {
+            if (output.channel == OutputChannel::tool_call) {
+                for (auto& filtered : state.stop_filter.finish())
+                    event.output_pieces.push_back({std::move(filtered.bytes), filtered.channel});
+                event.output_pieces.push_back({std::move(output.bytes), output.channel, output.tool_call_index,
+                    std::move(output.tool_call_id), std::move(output.tool_name)});
+            } else for (auto& filtered : state.stop_filter.push(std::move(output), state.stopped))
+                event.output_pieces.push_back({std::move(filtered.bytes), filtered.channel});
+        };
+        if (llama_vocab_is_eog(vocab, token)) {
+            for (auto& output : finish_parser(state.prepared)) { append_output(std::move(output)); if (state.stopped) break; }
+            if (!state.stopped) for (auto& output : state.stop_filter.finish())
+                event.output_pieces.push_back({std::move(output.bytes), output.channel});
+            state.accepted.clear(); event.finished = true; return;
+        }
+        event.generated_token = true;
+        for (auto& output : feed_parser(state.prepared, token_piece(vocab, token), token)) {
+            append_output(std::move(output)); if (state.stopped) break;
+        }
+        ++state.generated;
+        if (state.stopped || state.generated >= state.max_output_tokens) {
+            if (!state.stopped) {
+                for (auto& output : finish_parser(state.prepared)) { append_output(std::move(output)); if (state.stopped) break; }
+                if (!state.stopped) for (auto& output : state.stop_filter.finish())
+                    event.output_pieces.push_back({std::move(output.bytes), output.channel});
+            }
+            state.accepted.clear(); event.finished = true;
+        }
+    }
+
+    std::vector<BatchStepEvent> step_speculative(std::span<const SequenceId> sequences,
+                                                  std::size_t prefill_chunk_tokens) {
+        if (sequences.empty() || sequences.size() > 2 || prefill_chunk_tokens == 0 ||
+            prefill_chunk_tokens > config_.batch_tokens) throw std::invalid_argument("Invalid speculative batch turn");
+        std::vector<BatchStepEvent> events;
+        events.reserve(sequences.size());
+        for (const auto sequence : sequences) {
+            if (!states_.contains(sequence)) throw std::logic_error("Unknown speculative sequence");
+            events.push_back({sequence, false, false, {}, false, {}});
+        }
+
+        bool has_prefill = false;
+        for (const auto sequence : sequences) has_prefill |= states_.at(sequence).prefill_cursor < states_.at(sequence).tokens.size();
+        if (has_prefill) {
+            common_batch prompt_batch(context_.get());
+            std::size_t budget = config_.batch_tokens;
+            std::size_t pending = 0;
+            for (const auto sequence : sequences) if (states_.at(sequence).prefill_cursor < states_.at(sequence).tokens.size()) ++pending;
+            for (const auto sequence : sequences) {
+                auto& state = states_.at(sequence);
+                if (state.prefill_cursor >= state.tokens.size()) continue;
+                const auto share = std::max<std::size_t>(1, budget / pending);
+                const auto amount = std::min({state.tokens.size() - state.prefill_cursor, share, prefill_chunk_tokens, budget});
+                if (!amount) throw std::runtime_error("Speculative prefill has no batch capacity");
+                const auto end = state.prefill_cursor + amount;
+                for (auto cursor = state.prefill_cursor; cursor < end; ++cursor)
+                    prompt_batch.add(state.tokens[cursor], static_cast<llama_pos>(cursor), static_cast<llama_seq_id>(sequence), false);
+                state.prefill_cursor = end; budget -= amount; --pending;
+            }
+            if (prompt_batch.size() && (llama_process(context_.get(), LLAMA_PROCESS_TYPE_DECODE, prompt_batch.get()) != 0 ||
+                !common_speculative_process(speculative_.get(), prompt_batch)))
+                throw std::runtime_error("Two-sequence DFlash prompt evaluation failed");
+            for (const auto sequence : sequences) {
+                auto& state = states_.at(sequence);
+                if (state.prefill_cursor == state.tokens.size() && !state.speculative_begun) {
+                    common_speculative_begin(speculative_.get(), static_cast<llama_seq_id>(sequence), state.prompt);
+                    state.speculative_begun = true;
+                }
+            }
+            return events;
+        }
+
+        std::vector<SequenceId> verify;
+        for (std::size_t i = 0; i < sequences.size(); ++i) {
+            auto& state = states_.at(sequences[i]);
+            if (!state.accepted.empty()) emit_speculative_token(state, events[i], llama_model_get_vocab(model_.get()));
+            else verify.push_back(sequences[i]);
+        }
+        if (verify.empty()) return events;
+
+        for (const auto sequence : verify) {
+            auto& state = states_.at(sequence);
+            if (state.draft.empty()) {
+                state.checkpoint.update_pos(state.prompt.size(),
+                    llama_memory_seq_pos_min(llama_get_memory(context_.get()), sequence),
+                    llama_memory_seq_pos_max(llama_get_memory(context_.get()), sequence));
+                if (checkpoint_draft_) state.checkpoint.update_dft(speculative_init_->context(), sequence, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+                const auto remaining = state.max_output_tokens - state.generated;
+                const auto room = config_.context_tokens / 2 - static_cast<std::uint32_t>(state.past) - 1;
+                const auto maximum = std::min({config_.draft_tokens, remaining > 0 ? remaining - 1 : 0U, room});
+                common_speculative_get_draft_params(speculative_.get(), sequence) = {
+                    .drafting = true, .n_max = static_cast<std::int32_t>(maximum), .pos0 = state.past,
+                    .id_last = state.last, .prompt = &state.prompt, .result = &state.draft};
+            } else common_speculative_get_draft_params(speculative_.get(), sequence).drafting = false;
+        }
+        common_speculative_draft(speculative_.get());
+        for (const auto sequence : verify) {
+            auto& state = states_.at(sequence);
+            if (checkpoint_draft_ && !state.checkpoint.load_dft(speculative_init_->context(), sequence, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY))
+                throw std::runtime_error("Could not restore two-sequence DFlash checkpoint");
+            llama_memory_seq_rm(llama_get_memory(speculative_init_->context()), sequence, state.checkpoint.pos_max + 1, -1);
+            if (!state.draft.empty() && checkpoint_target_) state.checkpoint.update_tgt(context_.get(), sequence, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+        }
+
+        common_batch target_batch(context_.get());
+        std::map<SequenceId, std::vector<int>> indices;
+        for (const auto sequence : verify) {
+            auto& state = states_.at(sequence);
+            indices[sequence].push_back(target_batch.add(state.last, state.past++, sequence, true));
+            for (std::size_t i = 0; i < state.draft.size(); ++i)
+                indices[sequence].push_back(target_batch.add(state.draft[i], state.past + static_cast<llama_pos>(i), sequence, true));
+        }
+        if (llama_process(context_.get(), LLAMA_PROCESS_TYPE_DECODE, target_batch.get()) != 0 ||
+            !common_speculative_process(speculative_.get(), target_batch))
+            throw std::runtime_error("Two-sequence DFlash verification failed");
+        const auto* vocab = llama_model_get_vocab(model_.get());
+        for (const auto sequence : verify) {
+            auto& state = states_.at(sequence);
+            auto saved_sampler = checkpoint_target_ ? common_sampler_ptr(common_sampler_clone(state.speculative_sampler.get())) : nullptr;
+            const auto draft_count = state.draft.size();
+            auto accepted = common_sampler_sample_and_accept_n(state.speculative_sampler.get(), context_.get(), indices[sequence], state.draft);
+            const auto found = std::find(sequences.begin(), sequences.end(), sequence);
+            auto& event = events[static_cast<std::size_t>(found - sequences.begin())];
+            event.speculative_metrics = SpeculativeMetrics{draft_count, accepted.size() - 1};
+            if (checkpoint_target_ && accepted.size() - 1 < draft_count) {
+                state.draft = std::move(accepted);
+                if (!state.checkpoint.load_tgt(context_.get(), sequence, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) ||
+                    !state.checkpoint.load_dft(speculative_init_->context(), sequence, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY))
+                    throw std::runtime_error("Could not replay two-sequence DFlash acceptance");
+                llama_memory_seq_rm(llama_get_memory(context_.get()), sequence, state.checkpoint.pos_max + 1, -1);
+                llama_memory_seq_rm(llama_get_memory(speculative_init_->context()), sequence, state.checkpoint.pos_max + 1, -1);
+                state.prompt.resize(state.checkpoint.n_tokens); state.speculative_sampler = std::move(saved_sampler);
+                state.past = static_cast<int>(state.prompt.size()); state.replay = true; continue;
+            }
+            common_speculative_accept(speculative_.get(), sequence, static_cast<std::uint16_t>(accepted.size() - 1));
+            state.past += static_cast<int>(accepted.size() - 1);
+            for (const auto token : accepted) { state.prompt.push_back(state.last); state.last = token; state.accepted.push_back(token); }
+            state.draft.clear(); state.replay = false;
+            llama_memory_seq_rm(llama_get_memory(context_.get()), sequence, state.past, -1);
+            llama_memory_seq_rm(llama_get_memory(speculative_init_->context()), sequence, state.past, -1);
+            emit_speculative_token(state, event, vocab);
+        }
+        return events;
+    }
+
     struct State {
         std::vector<llama_token> tokens;
         std::size_t prefill_cursor = 0;
@@ -806,9 +1217,19 @@ private:
         std::uint32_t max_output_tokens = 0;
         std::optional<llama_token> pending_token;
         Owned<llama_sampler, llama_sampler_free> sampler{nullptr, llama_sampler_free};
+        common_sampler_ptr speculative_sampler;
         PreparedPrompt prepared;
         StopFilter stop_filter;
         bool stopped = false;
+        llama_tokens prompt;
+        llama_tokens draft;
+        std::deque<llama_token> accepted;
+        common_prompt_checkpoint checkpoint;
+        llama_token last = LLAMA_TOKEN_NULL;
+        int past = 0;
+        bool speculative_started = false;
+        bool speculative_begun = false;
+        bool replay = false;
     };
 
     int32_t add_token(SequenceId sequence, llama_token token, llama_pos position, bool logits) {
@@ -872,6 +1293,11 @@ private:
     Owned<llama_model, llama_model_free> model_{nullptr, llama_model_free};
     Owned<llama_context, llama_free> context_{nullptr, llama_free};
     Owned<llama_batch_ext, llama_batch_ext_free> batch_{nullptr, llama_batch_ext_free};
+    common_speculative_init_result_ptr speculative_init_;
+    common_params_speculative speculative_params_;
+    common_speculative_ptr speculative_;
+    bool checkpoint_target_ = false;
+    bool checkpoint_draft_ = false;
     PromptFormatter prompt_formatter_;
     std::map<SequenceId, State> states_;
     mutable std::mutex memory_mutex_;
@@ -884,7 +1310,10 @@ std::unique_ptr<InferenceBackend> make_llama_backend(const LlamaModelConfig& con
     if (!std::filesystem::is_regular_file(config.path) || config.threads < 1 ||
         config.context_tokens < 32 || config.context_tokens > 1048576 ||
         config.max_output_tokens == 0 || config.max_output_tokens > config.context_tokens ||
-        config.batch_tokens == 0 || config.batch_tokens > config.context_tokens || config.gpu_layers < 0) {
+        config.batch_tokens == 0 || config.batch_tokens > config.context_tokens || config.gpu_layers < 0 ||
+        (!config.draft_model_path.empty() &&
+         (!std::filesystem::is_regular_file(config.draft_model_path) || config.draft_tokens == 0 ||
+          config.draft_tokens > 32))) {
         throw std::invalid_argument("Invalid local model path or execution configuration");
     }
     return std::make_unique<LlamaBackend>(config);
@@ -894,7 +1323,9 @@ std::unique_ptr<BatchExecutor> make_llama_batch_executor(const LlamaModelConfig&
     if (!std::filesystem::is_regular_file(config.path) || config.threads < 1 ||
         config.context_tokens < 64 || config.context_tokens > 1048576 ||
         config.max_output_tokens == 0 || config.max_output_tokens > config.context_tokens / 2 ||
-        config.batch_tokens != 128 || config.gpu_layers < 0) {
+        config.batch_tokens != 128 || config.gpu_layers < 0 ||
+        (!config.draft_model_path.empty() &&
+         (!std::filesystem::is_regular_file(config.draft_model_path) || config.draft_tokens == 0 || config.draft_tokens > 32))) {
         throw std::invalid_argument("Invalid conservative two-sequence model configuration");
     }
     return std::make_unique<LlamaBatchExecutor>(config);

@@ -1,5 +1,28 @@
 # Baseline benchmark methodology
 
+## Continuous DFlash comparison
+
+The public concurrency runner can compare the same qualified continuous target with
+and without an explicit existing DFlash draft:
+
+```sh
+python3.12 benchmarks/runners/batching_comparison.py /absolute/path/target.gguf \
+  --draft-model /absolute/path/draft.gguf \
+  --config benchmarks/workloads/dflash-continuous.json
+```
+
+The bounded M4 Air closeout used one warmup followed by two concurrent clients with
+two 96-token repetitions each. Both modes completed 4/4 requests, reached two native
+executing sequences and produced identical output digest sets. Target-only measured
+16.53 tok/s aggregate throughput and 218.65 ms median client TTFT. DFlash measured
+15.96 tok/s, 750.82 ms TTFT and accepted 240 of 980 drafted tokens (24.49%). Median
+client latency was 11,446.39 ms target-only and 10,437.30 ms with DFlash.
+
+This four-request sample demonstrates correctness and telemetry, not a general speedup,
+tail-latency or thermal claim. Raw JSON/CSV results stay ignored under
+`benchmarks/results/`; the runner records target/draft identity, runtime revisions,
+configuration, request correlations, scheduler samples and memory snapshots.
+
 Phase 4's public-API concurrency harness and its distinct client/scheduler metric
 boundaries are documented in [concurrency-benchmarking.md](concurrency-benchmarking.md).
 

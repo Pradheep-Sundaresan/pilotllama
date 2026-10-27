@@ -55,6 +55,8 @@ and [Ollama documentation](https://docs.ollama.com/) for their respective capabi
 - bearer auth, token-bucket rate limiting, drain/resume, readiness and managed restart
 - localhost gRPC server-streaming between Go and C++
 - bounded queue mode or opt-in two-sequence continuous batching
+- optional qualified DFlash speculative decoding in queue or two-sequence continuous mode
+- per-request DFlash drafted/accepted-token and acceptance-rate telemetry
 - cooperative deadlines, disconnect cancellation and per-sequence cleanup
 - structured 1–64-message chat with optional system message and alternating
   user/assistant history, rendered by supported embedded templates
@@ -86,6 +88,13 @@ Optional bounded compatibility report for an existing GGUF:
 ./scripts/drive-model.sh /absolute/path/model.gguf --model-id local-model
 ```
 
+To qualify an existing compatible DFlash pair:
+
+```sh
+./scripts/drive-model.sh /absolute/path/target.gguf \
+  --draft-model /absolute/path/dflash.gguf --model-id local-model
+```
+
 This runs an isolated loopback service, stores no prompts or outputs, stops automatically
 and writes its private report under ignored `build/pilotllama/`.
 
@@ -103,6 +112,21 @@ operator budgets only when the model and available unified memory support them:
 ```sh
 ./scripts/start.sh --model /absolute/path/model.gguf \
   --context-tokens 8192 --max-output-tokens 1024
+```
+
+Optional DFlash acceleration is explicit and uses two existing local files. Queue mode
+works after normal pair validation; continuous mode additionally requires exact-pair
+qualification with `scripts/test-native-batching.sh`:
+
+```sh
+./scripts/start.sh --model /absolute/path/target.gguf \
+  --draft-model /absolute/path/dflash.gguf --batching queue
+
+# After the exact pair passes local continuous qualification:
+./scripts/test-native-batching.sh /absolute/path/target.gguf \
+  /absolute/path/dflash.gguf
+./scripts/start.sh --model /absolute/path/target.gguf \
+  --draft-model /absolute/path/dflash.gguf --batching continuous
 ```
 
 Open `http://127.0.0.1:8080/`. Later starts reuse the saved model selection:
@@ -176,8 +200,8 @@ cooperative cancellation. Metal work is not preempted, so cleanup may outlast HT
 
 | Mode | Native execution | Status |
 | --- | --- | --- |
-| `queue` | 1 active request + bounded wait queue | default |
-| `continuous` | 2 active sequences + 2 waiting, one operator-sized shared context | opt-in; built-in verified or exact locally qualified GGUF |
+| `queue` | 1 active request + bounded wait queue; optional compatible DFlash draft | default |
+| `continuous` | 2 active sequences + 2 waiting; optional exact-pair-qualified DFlash | opt-in; built-in verified or exact locally qualified GGUF/pair |
 
 The measured two-client comparison reduced median TTFT from **1,146.7 ms to
 262.3 ms** and native queue wait from **1,012.5 ms to 0.012 ms**. Throughput changed
@@ -195,6 +219,8 @@ mode. Qualify an existing local artifact without downloading or modifying it:
 
 The bounded test records core generation, multi-turn chat, deterministic sampling,
 structured JSON and tools where applicable, plus exact-file continuous qualification.
+With `--draft-model`, it additionally records the draft artifact name/size, drafted
+tokens, accepted tokens and measured acceptance rate.
 It stores no prompts or model outputs.
 
 - **Verified:** the complete applicable test suite passed for the exact artifact,
@@ -213,7 +239,10 @@ template. Continuous mode requires built-in verification or a successful bounded
 qualification tied to the unchanged GGUF file; otherwise it fails closed.
 
 Queue mode has also been verified with an embedded-template Nemotron Bolt GGUF. There
-is no claim of arbitrary GGUF, full Jinja or multimodal support. Supported templates
+is no claim of arbitrary GGUF, universal target/draft compatibility, full Jinja or
+multimodal support. DFlash is optional; continuous DFlash requires an unchanged,
+locally qualified target/draft pair. Failed requested initialization fails closed
+instead of silently changing execution. Supported templates
 can use multi-turn chat, bounded tools and structured JSON.
 [Details](docs/model-selection.md).
 
@@ -222,12 +251,21 @@ can use multi-turn chat, bounded tools and structured JSON.
 | Existing local artifact | Core chat | Multi-turn | Reasoning | Tools | Structured JSON | Continuous |
 | --- | --- | --- | --- | --- | --- | --- |
 | Nemotron Nano 4B, Q4_K_M | verified JSON/SSE | unavailable with its template-less fallback | unavailable | unavailable | unqualified | built-in verified |
-| Nemotron 3.5 Bolt E4B, Q4_K_M | verified | verified | detected | verified | bounded probe failed | exact file qualified |
+| Nemotron 3.5 Bolt E4B, Q4_K_M | verified; DFlash pair qualified | verified | detected | verified | bounded probe failed | exact file qualified |
 
 These are results for the exact local GGUFs and pinned runtime—not promises for every
 model, quantization or machine. Bolt passed 4/5 bounded Driving Test checks; its strict
 structured-JSON probe failed and remains experimental. Declared context is a model
 maximum, while actual service context/output budgets remain operator configured.
+The bounded DFlash run measured 119 proposed and 9 accepted draft tokens (7.56%) across
+the suite. This validates accounting and compatibility, not a universal speedup; the
+earlier controlled Phase 9A comparison measured 28.16 versus 40.59 tok/s with identical
+greedy output on this machine.
+
+A bounded two-client continuous comparison completed 4/4 requests in both modes with
+identical output digests. DFlash measured 24.49% acceptance, but throughput was 15.96
+versus 16.53 tok/s target-only and median TTFT was higher. PilotLlama therefore makes
+no general continuous-DFlash speedup claim. [Method and evidence](docs/benchmarking.md#continuous-dflash-comparison).
 
 ## Components
 

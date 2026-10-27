@@ -32,14 +32,23 @@ type modelCapabilitiesReport struct {
 }
 
 type drivingTestSummary struct {
-	ObservedAtUnixMS    int64           `json:"observed_at_unix_ms"`
-	ModelID             string          `json:"model_id"`
-	FileName            string          `json:"file_name"`
-	Grade               string          `json:"grade"`
-	Checks              map[string]bool `json:"checks"`
-	ContinuousQualified bool            `json:"continuous_qualified"`
-	PhysicalMemoryBytes *uint64         `json:"physical_memory_bytes,omitempty"`
-	Method              string          `json:"method"`
+	ObservedAtUnixMS    int64                     `json:"observed_at_unix_ms"`
+	ModelID             string                    `json:"model_id"`
+	FileName            string                    `json:"file_name"`
+	Grade               string                    `json:"grade"`
+	Checks              map[string]bool           `json:"checks"`
+	ContinuousQualified bool                      `json:"continuous_qualified"`
+	PhysicalMemoryBytes *uint64                   `json:"physical_memory_bytes,omitempty"`
+	SpeculativeDecoding *speculativeQualification `json:"speculative_decoding,omitempty"`
+	Method              string                    `json:"method"`
+}
+
+type speculativeQualification struct {
+	DraftFileName      string   `json:"draft_file_name"`
+	DraftFileSizeBytes uint64   `json:"draft_file_size_bytes"`
+	DraftedTokens      uint64   `json:"drafted_tokens"`
+	AcceptedTokens     uint64   `json:"accepted_tokens"`
+	AcceptanceRate     *float64 `json:"acceptance_rate"`
 }
 
 func (s *Service) drivingTest(modelID string) *drivingTestSummary {
@@ -59,6 +68,12 @@ func (s *Service) drivingTest(modelID string) *drivingTestSummary {
 	if json.Unmarshal(data, &report) != nil || report.ModelID != modelID || report.ObservedAtUnixMS <= 0 || report.FileName == "" || report.Method != "bounded_local_driving_test" ||
 		(report.Grade != "verified" && report.Grade != "compatible" && report.Grade != "experimental" && report.Grade != "unsupported") {
 		return nil
+	}
+	if q := report.SpeculativeDecoding; q != nil {
+		if q.DraftFileName == "" || q.DraftFileSizeBytes == 0 || q.AcceptedTokens > q.DraftedTokens ||
+			(q.AcceptanceRate != nil && (*q.AcceptanceRate < 0 || *q.AcceptanceRate > 1)) {
+			return nil
+		}
 	}
 	return &report
 }

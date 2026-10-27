@@ -23,6 +23,9 @@ func TestRequestHistoryCaptureAndPrivacy(t *testing.T) {
 			return rpcbackend.Observation{}, err
 		}
 		v := success(1)
+		v.Finished.Metrics.SpeculativeDraftedTokens = func() *uint64 { x := uint64(8); return &x }()
+		v.Finished.Metrics.SpeculativeAcceptedTokens = func() *uint64 { x := uint64(5); return &x }()
+		v.Finished.Metrics.SpeculativeAcceptanceRate = func() *float64 { x := 0.625; return &x }()
 		v.ReceivedTokens, v.TokenBytes = 1, 14
 		return v, nil
 	}}
@@ -43,7 +46,7 @@ func TestRequestHistoryCaptureAndPrivacy(t *testing.T) {
 	if err := json.Unmarshal(v.Body.Bytes(), &record); err != nil {
 		t.Fatal(err)
 	}
-	if v.Code != 200 || record.RequestID != id || record.Outcome != "completed" || record.Native == nil || record.Native.OutputTokens != 1 || record.ReceivedTokens != 1 || record.Native.TTFTMS != nil || record.RPCTTFTMS != nil || record.StreamWriteFailed != nil || record.HandlerLatencyMS < 0 {
+	if v.Code != 200 || record.RequestID != id || record.Outcome != "completed" || record.Native == nil || record.Native.OutputTokens != 1 || record.Native.SpeculativeDraftedTokens == nil || *record.Native.SpeculativeDraftedTokens != 8 || record.Native.SpeculativeAcceptedTokens == nil || *record.Native.SpeculativeAcceptedTokens != 5 || record.Native.SpeculativeAcceptanceRate == nil || *record.Native.SpeculativeAcceptanceRate != 0.625 || record.ReceivedTokens != 1 || record.Native.TTFTMS != nil || record.RPCTTFTMS != nil || record.StreamWriteFailed != nil || record.HandlerLatencyMS < 0 {
 		t.Fatalf("unexpected record %s", v.Body)
 	}
 	for _, secret := range []string{testSecret, "private-prompt", "private-output"} {

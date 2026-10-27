@@ -35,6 +35,17 @@ TEST(RequestMetrics, MissingEventsStayNullAndOneTokenHasNoInterval) {
     EXPECT_EQ(m.ttft_ms, 3);
 }
 
+TEST(RequestMetrics, SpeculativeMeasurementsRemainExplicit) {
+    inferno::RequestMetrics m;
+    m.speculative_drafted_tokens = 8;
+    m.speculative_accepted_tokens = 5;
+    m.speculative_acceptance_rate = 0.625;
+    const auto json = inferno::metrics_json(1, inferno::RequestState::completed, m);
+    EXPECT_NE(json.find("\"speculative_drafted_tokens\":8"), std::string::npos);
+    EXPECT_NE(json.find("\"speculative_accepted_tokens\":5"), std::string::npos);
+    EXPECT_NE(json.find("\"speculative_acceptance_rate\":0.625"), std::string::npos);
+}
+
 TEST(RequestMetrics, ZeroDurationDoesNotProduceInfiniteRate) {
     inferno::RequestTimings t;
     t.submitted = at(0); t.decode_started = at(0); t.backend_finished = at(0); t.finished = at(0); t.output_tokens = 1;

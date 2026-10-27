@@ -13,13 +13,13 @@ import (
 
 // Opt-in: one production managed child using the explicit continuous scheduler.
 func TestNativeContinuousBatching(t *testing.T) {
-	binary, model := os.Getenv("INFERNO_NATIVE_RPC_SERVER"), os.Getenv("INFERNO_NATIVE_RPC_MODEL")
+	binary, model, draft := os.Getenv("INFERNO_NATIVE_RPC_SERVER"), os.Getenv("INFERNO_NATIVE_RPC_MODEL"), os.Getenv("INFERNO_NATIVE_RPC_DRAFT_MODEL")
 	if binary == "" || model == "" {
 		t.Skip("opt in with scripts/test-native-batching.sh EXISTING_LOCAL_GGUF")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	manager, err := NewManager(ctx, Config{Executable: binary, Model: model, ModelID: "local-nemotron-4b",
+	manager, err := NewManager(ctx, Config{Executable: binary, Model: model, DraftModel: draft, ModelID: "local-nemotron-4b",
 		StateDir: t.TempDir(), Batching: "continuous", QualifyContinuous: true,
 		StartupTimeout: 30 * time.Second, ShutdownTimeout: 15 * time.Second})
 	if err != nil {
@@ -35,11 +35,12 @@ func TestNativeContinuousBatching(t *testing.T) {
 	}
 
 	type outcome struct {
-		text   string
-		tokens uint32
-		state  pb.TerminalState
-		detail string
-		err    error
+		text, detail      string
+		tokens            uint32
+		state             pb.TerminalState
+		drafted, accepted uint64
+		hasSpeculative    bool
+		err               error
 	}
 	run := func(id uint64, prompt string, output uint32, first chan<- struct{}) outcome {
 		var text strings.Builder
@@ -53,7 +54,11 @@ func TestNativeContinuousBatching(t *testing.T) {
 			}
 			return nil
 		})
-		return outcome{text.String(), obs.Finished.GetMetrics().GetOutputTokens(), obs.Finished.GetState(), obs.Finished.GetError().GetMessage(), err}
+		metrics := obs.Finished.GetMetrics()
+		return outcome{text: text.String(), tokens: metrics.GetOutputTokens(), state: obs.Finished.GetState(),
+			detail: obs.Finished.GetError().GetMessage(), drafted: metrics.GetSpeculativeDraftedTokens(),
+			accepted: metrics.GetSpeculativeAcceptedTokens(), hasSpeculative: metrics.SpeculativeDraftedTokens != nil,
+			err: err}
 	}
 
 	start := make(chan struct{})
@@ -62,9 +67,9 @@ func TestNativeContinuousBatching(t *testing.T) {
 	for _, item := range []struct {
 		id     uint64
 		prompt string
-	}{{1, "What is 2 + 2? Reply with just the number."}, {2, "What is 3 + 3? Reply with just the number."}} {
+	}{{1, "Explain in detail why local AI is useful for application one."}, {2, "Explain in detail why local AI is useful for application two."}} {
 		workers.Add(1)
-		go func(id uint64, prompt string) { defer workers.Done(); <-start; results <- run(id, prompt, 4, nil) }(item.id, item.prompt)
+		go func(id uint64, prompt string) { defer workers.Done(); <-start; results <- run(id, prompt, 128, nil) }(item.id, item.prompt)
 	}
 	close(start)
 	workers.Wait()
@@ -72,6 +77,9 @@ func TestNativeContinuousBatching(t *testing.T) {
 	for result := range results {
 		if result.err != nil || result.state != pb.TerminalState_TERMINAL_STATE_COMPLETED || result.tokens == 0 {
 			t.Fatalf("parallel result: %+v", result)
+		}
+		if draft != "" && (!result.hasSpeculative || result.drafted == 0 || result.accepted > result.drafted) {
+			t.Fatalf("parallel speculative measurements: %+v", result)
 		}
 	}
 

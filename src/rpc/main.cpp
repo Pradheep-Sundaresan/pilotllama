@@ -28,11 +28,11 @@ int main(int argc, char** argv) {
         std::cout << "Usage: inferno_rpc_server --model LOCAL_GGUF [--listen 127.0.0.1:8081]\n"
                      "       [--model-id local-nemotron-4b] [--ready-file NEW_LOCAL_PATH]\n"
                      "       [--batching queue|continuous] [--context-tokens 4096]\n"
-                     "       [--max-output-tokens 512]\n"
+                     "       [--max-output-tokens 512] [--draft-model LOCAL_DFLASH_GGUF]\n"
                      "Requires a supported local GGUF; no model downloads or public HTTP API.\n";
         return 0;
     }
-    std::string model, address = "127.0.0.1:8081", model_id = "local-nemotron-4b", ready, batching = "queue";
+    std::string model, draft_model, address = "127.0.0.1:8081", model_id = "local-nemotron-4b", ready, batching = "queue";
     std::uint32_t context_tokens = 4096, max_output_tokens = 512;
     bool qualify_continuous = false;
     try {
@@ -42,6 +42,7 @@ int main(int argc, char** argv) {
             if (i + 1 >= argc || !options.insert(key).second) throw std::invalid_argument("Missing value or duplicate option");
             const std::string value(argv[i + 1]);
             if (key == "--model") model = value;
+            else if (key == "--draft-model") draft_model = value;
             else if (key == "--listen") address = value;
             else if (key == "--model-id") model_id = value;
             else if (key == "--ready-file") ready = value;
@@ -77,13 +78,14 @@ int main(int argc, char** argv) {
     if (pthread_sigmask(SIG_BLOCK, &signals, nullptr) != 0) { std::cerr << "Cannot configure process signal handling\n"; return 1; }
     try {
         std::unique_ptr<inferno::GenerationRuntime> runtime;
-        const inferno::LlamaModelConfig model_config{.path = model, .context_tokens = context_tokens,
+        const inferno::LlamaModelConfig model_config{.path = model, .draft_model_path = draft_model, .context_tokens = context_tokens,
             .max_output_tokens = max_output_tokens, .allow_unqualified_continuous = qualify_continuous};
         if (batching == "continuous") {
             runtime = std::make_unique<inferno::ContinuousBatchEngine>(
                 inferno::make_llama_batch_executor(model_config),
                 inferno::BatchEngineConfig{.per_sequence_context_tokens = context_tokens / 2,
-                    .max_output_tokens = max_output_tokens});
+                    .max_output_tokens = max_output_tokens,
+                    .delivery_capacity = draft_model.empty() ? 2U : model_config.draft_tokens + 1U});
         } else {
             runtime = std::make_unique<inferno::Runtime>(inferno::make_llama_backend(model_config), 2);
         }

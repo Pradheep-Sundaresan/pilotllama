@@ -132,6 +132,7 @@ func TestInvalidConfigNeverStarts(t *testing.T) {
 		func(c *Config) { c.ContextTokens, c.MaxOutputTokens = 31, 1 },
 		func(c *Config) { c.ContextTokens, c.MaxOutputTokens = 4096, 4097 },
 		func(c *Config) { c.Batching, c.ContextTokens, c.MaxOutputTokens = "continuous", 4096, 2049 },
+		func(c *Config) { c.DraftModel = "relative.gguf" },
 	} {
 		c := config(t)
 		mutate(&c)
@@ -139,6 +140,22 @@ func TestInvalidConfigNeverStarts(t *testing.T) {
 		if err == nil {
 			t.Fatal("accepted invalid configuration")
 		}
+	}
+}
+
+func TestQueueModeAcceptsExistingDraftModel(t *testing.T) {
+	c := config(t)
+	c.Batching, c.DraftModel = "queue", c.Model
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestContinuousModeAcceptsExistingQualifiedDraftModel(t *testing.T) {
+	c := config(t)
+	c.Batching, c.DraftModel, c.QualifyContinuous = "continuous", c.Model, true
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
 	}
 }
 

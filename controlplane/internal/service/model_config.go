@@ -14,11 +14,14 @@ import (
 type modelConfig struct {
 	Path            string `json:"path"`
 	FileName        string `json:"file_name"`
+	DraftModelPath  string `json:"draft_model_path"`
+	DraftFileName   string `json:"draft_file_name"`
 	ModelID         string `json:"model_id"`
 	Batching        string `json:"batching"`
 	ContextTokens   uint32 `json:"context_tokens"`
 	MaxOutputTokens uint32 `json:"max_output_tokens"`
 	SizeBytes       int64  `json:"size_bytes"`
+	DraftSizeBytes  int64  `json:"draft_size_bytes"`
 	Format          string `json:"format"`
 	PreflightLevel  string `json:"preflight_level"`
 	RestartNeeded   bool   `json:"restart_needed"`
@@ -35,7 +38,7 @@ func readSmallFile(name string) (string, error) {
 	return strings.TrimSuffix(string(b), "\n"), nil
 }
 
-func inspectModel(path, id, batching string, contextTokens, maxOutputTokens uint32) (modelConfig, error) {
+func inspectModel(path, draft, id, batching string, contextTokens, maxOutputTokens uint32) (modelConfig, error) {
 	if !filepath.IsAbs(path) {
 		return modelConfig{}, errors.New("model path must be absolute")
 	}
@@ -69,8 +72,25 @@ func inspectModel(path, id, batching string, contextTokens, maxOutputTokens uint
 	if _, err := io.ReadFull(f, magic[:]); err != nil || string(magic[:]) != "GGUF" {
 		return modelConfig{}, errors.New("file does not have a GGUF container header")
 	}
-	return modelConfig{path, filepath.Base(path), id, batching, contextTokens, maxOutputTokens,
-		info.Size(), "GGUF", "container_header_only", true}, nil
+	draftName, draftSize := "", int64(0)
+	if draft != "" {
+		draftInfo, err := os.Lstat(draft)
+		if !filepath.IsAbs(draft) || err != nil || draftInfo.Mode()&os.ModeSymlink != 0 || !draftInfo.Mode().IsRegular() {
+			return modelConfig{}, errors.New("draft model must be an absolute regular non-symlink file")
+		}
+		draftFile, err := os.Open(draft)
+		if err != nil {
+			return modelConfig{}, errors.New("draft model is not readable")
+		}
+		defer draftFile.Close()
+		var draftMagic [4]byte
+		if _, err := io.ReadFull(draftFile, draftMagic[:]); err != nil || string(draftMagic[:]) != "GGUF" {
+			return modelConfig{}, errors.New("draft model does not have a GGUF container header")
+		}
+		draftName, draftSize = filepath.Base(draft), draftInfo.Size()
+	}
+	return modelConfig{path, filepath.Base(path), draft, draftName, id, batching, contextTokens, maxOutputTokens,
+		info.Size(), draftSize, "GGUF", "container_header_only", true}, nil
 }
 
 func readBudget(dir, name string, fallback uint32) uint32 {
@@ -113,7 +133,8 @@ func (s *Service) modelConfig(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 404, fail("No saved model configuration", "invalid_request_error", "model_config_not_found"))
 			return
 		}
-		cfg, err := inspectModel(path, id, batching,
+		draft, _ := readSmallFile(filepath.Join(s.modelConfigDir, "draft-model.path"))
+		cfg, err := inspectModel(path, draft, id, batching,
 			readBudget(s.modelConfigDir, "context.tokens", 4096), readBudget(s.modelConfigDir, "max-output.tokens", 512))
 		if err != nil {
 			writeJSON(w, 422, fail(err.Error(), "invalid_request_error", "model_preflight_failed"))
@@ -125,6 +146,7 @@ func (s *Service) modelConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	var input struct {
 		Path            string `json:"path"`
+		DraftModelPath  string `json:"draft_model_path"`
 		ModelID         string `json:"model_id"`
 		Batching        string `json:"batching"`
 		ContextTokens   uint32 `json:"context_tokens"`
@@ -146,12 +168,13 @@ func (s *Service) modelConfig(w http.ResponseWriter, r *http.Request) {
 	if input.MaxOutputTokens == 0 {
 		input.MaxOutputTokens = 512
 	}
-	cfg, err := inspectModel(input.Path, input.ModelID, input.Batching, input.ContextTokens, input.MaxOutputTokens)
+	cfg, err := inspectModel(input.Path, input.DraftModelPath, input.ModelID, input.Batching, input.ContextTokens, input.MaxOutputTokens)
 	if err != nil {
 		writeJSON(w, 422, fail(err.Error(), "invalid_request_error", "model_preflight_failed"))
 		return
 	}
 	for _, item := range []struct{ name, value string }{{"model.path", cfg.Path}, {"model.id", cfg.ModelID}, {"batching", cfg.Batching},
+		{"draft-model.path", cfg.DraftModelPath},
 		{"context.tokens", strconv.FormatUint(uint64(cfg.ContextTokens), 10)},
 		{"max-output.tokens", strconv.FormatUint(uint64(cfg.MaxOutputTokens), 10)}} {
 		if err := writePrivateAtomic(s.modelConfigDir, item.name, item.value); err != nil {

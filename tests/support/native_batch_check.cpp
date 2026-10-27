@@ -40,15 +40,18 @@ std::uint64_t required(const std::optional<std::uint64_t>& value, const char* na
 }
 
 int main(int argc, char** argv) {
-    if (argc != 2 || !std::filesystem::is_regular_file(argv[1])) {
-        std::cerr << "Usage: inferno_native_batch_check EXISTING_LOCAL_GGUF\n";
+    if ((argc != 2 && argc != 3) || !std::filesystem::is_regular_file(argv[1]) ||
+        (argc == 3 && !std::filesystem::is_regular_file(argv[2]))) {
+        std::cerr << "Usage: inferno_native_batch_check EXISTING_LOCAL_GGUF [EXISTING_DFLASH_GGUF]\n";
         return 2;
     }
     try {
         auto traced = std::make_unique<TracedExecutor>(inferno::make_llama_batch_executor(
-            {.path = argv[1], .allow_unqualified_continuous = true}));
+            {.path = argv[1], .draft_model_path = argc == 3 ? argv[2] : "", .allow_unqualified_continuous = true}));
         auto* trace = traced.get();
-        inferno::ContinuousBatchEngine engine(std::move(traced));
+        inferno::BatchEngineConfig config;
+        config.delivery_capacity = argc == 3 ? 8 : 2;
+        inferno::ContinuousBatchEngine engine(std::move(traced), config);
         const auto before = engine.memory_snapshot();
         if (!before || before->configured_sequences != 2) throw std::runtime_error("Two-sequence memory snapshot unavailable");
         const auto ready = std::find_if(before->process_samples.begin(), before->process_samples.end(), [](const auto& sample) {

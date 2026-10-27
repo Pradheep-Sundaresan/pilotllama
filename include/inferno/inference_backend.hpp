@@ -10,6 +10,10 @@
 #include <string_view>
 
 namespace inferno {
+struct SpeculativeMetrics {
+    std::uint64_t drafted_tokens = 0;
+    std::uint64_t accepted_tokens = 0;
+};
 
 // Called synchronously by one runtime worker. Notify decoding once, just before
 // decode begins; omit it for zero-output completion. Never retain the callback or
@@ -25,6 +29,7 @@ public:
     // Implementations must return a bounded copy safe to read during generation.
     virtual std::optional<MemorySnapshot> memory_snapshot() const { return std::nullopt; }
     virtual std::optional<ModelCapabilities> model_capabilities() const { return std::nullopt; }
+    virtual std::optional<SpeculativeMetrics> take_speculative_metrics() { return std::nullopt; }
     virtual void generate(const GenerationRequest& request, const DecodeStarted& decode_started,
                           const TokenCallback& token, const Checkpoint& checkpoint) = 0;
 };

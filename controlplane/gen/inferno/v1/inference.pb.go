@@ -1997,16 +1997,19 @@ type RequestMetrics struct {
 	state        protoimpl.MessageState `protogen:"open.v1"`
 	OutputTokens uint32                 `protobuf:"varint,1,opt,name=output_tokens,json=outputTokens,proto3" json:"output_tokens,omitempty"`
 	// All durations are milliseconds, measured in the C++ runtime.
-	RuntimeLatencyMs      *float64 `protobuf:"fixed64,2,opt,name=runtime_latency_ms,json=runtimeLatencyMs,proto3,oneof" json:"runtime_latency_ms,omitempty"`
-	QueueWaitMs           *float64 `protobuf:"fixed64,3,opt,name=queue_wait_ms,json=queueWaitMs,proto3,oneof" json:"queue_wait_ms,omitempty"`
-	BackendExecutionMs    *float64 `protobuf:"fixed64,4,opt,name=backend_execution_ms,json=backendExecutionMs,proto3,oneof" json:"backend_execution_ms,omitempty"`
-	PrefillPhaseMs        *float64 `protobuf:"fixed64,5,opt,name=prefill_phase_ms,json=prefillPhaseMs,proto3,oneof" json:"prefill_phase_ms,omitempty"`
-	DecodePhaseMs         *float64 `protobuf:"fixed64,6,opt,name=decode_phase_ms,json=decodePhaseMs,proto3,oneof" json:"decode_phase_ms,omitempty"`
-	TtftMs                *float64 `protobuf:"fixed64,7,opt,name=ttft_ms,json=ttftMs,proto3,oneof" json:"ttft_ms,omitempty"`
-	MeanInterTokenMs      *float64 `protobuf:"fixed64,8,opt,name=mean_inter_token_ms,json=meanInterTokenMs,proto3,oneof" json:"mean_inter_token_ms,omitempty"`
-	DecodeTokensPerSecond *float64 `protobuf:"fixed64,9,opt,name=decode_tokens_per_second,json=decodeTokensPerSecond,proto3,oneof" json:"decode_tokens_per_second,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	RuntimeLatencyMs          *float64 `protobuf:"fixed64,2,opt,name=runtime_latency_ms,json=runtimeLatencyMs,proto3,oneof" json:"runtime_latency_ms,omitempty"`
+	QueueWaitMs               *float64 `protobuf:"fixed64,3,opt,name=queue_wait_ms,json=queueWaitMs,proto3,oneof" json:"queue_wait_ms,omitempty"`
+	BackendExecutionMs        *float64 `protobuf:"fixed64,4,opt,name=backend_execution_ms,json=backendExecutionMs,proto3,oneof" json:"backend_execution_ms,omitempty"`
+	PrefillPhaseMs            *float64 `protobuf:"fixed64,5,opt,name=prefill_phase_ms,json=prefillPhaseMs,proto3,oneof" json:"prefill_phase_ms,omitempty"`
+	DecodePhaseMs             *float64 `protobuf:"fixed64,6,opt,name=decode_phase_ms,json=decodePhaseMs,proto3,oneof" json:"decode_phase_ms,omitempty"`
+	TtftMs                    *float64 `protobuf:"fixed64,7,opt,name=ttft_ms,json=ttftMs,proto3,oneof" json:"ttft_ms,omitempty"`
+	MeanInterTokenMs          *float64 `protobuf:"fixed64,8,opt,name=mean_inter_token_ms,json=meanInterTokenMs,proto3,oneof" json:"mean_inter_token_ms,omitempty"`
+	DecodeTokensPerSecond     *float64 `protobuf:"fixed64,9,opt,name=decode_tokens_per_second,json=decodeTokensPerSecond,proto3,oneof" json:"decode_tokens_per_second,omitempty"`
+	SpeculativeDraftedTokens  *uint64  `protobuf:"varint,10,opt,name=speculative_drafted_tokens,json=speculativeDraftedTokens,proto3,oneof" json:"speculative_drafted_tokens,omitempty"`
+	SpeculativeAcceptedTokens *uint64  `protobuf:"varint,11,opt,name=speculative_accepted_tokens,json=speculativeAcceptedTokens,proto3,oneof" json:"speculative_accepted_tokens,omitempty"`
+	SpeculativeAcceptanceRate *float64 `protobuf:"fixed64,12,opt,name=speculative_acceptance_rate,json=speculativeAcceptanceRate,proto3,oneof" json:"speculative_acceptance_rate,omitempty"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *RequestMetrics) Reset() {
@@ -2098,6 +2101,27 @@ func (x *RequestMetrics) GetMeanInterTokenMs() float64 {
 func (x *RequestMetrics) GetDecodeTokensPerSecond() float64 {
 	if x != nil && x.DecodeTokensPerSecond != nil {
 		return *x.DecodeTokensPerSecond
+	}
+	return 0
+}
+
+func (x *RequestMetrics) GetSpeculativeDraftedTokens() uint64 {
+	if x != nil && x.SpeculativeDraftedTokens != nil {
+		return *x.SpeculativeDraftedTokens
+	}
+	return 0
+}
+
+func (x *RequestMetrics) GetSpeculativeAcceptedTokens() uint64 {
+	if x != nil && x.SpeculativeAcceptedTokens != nil {
+		return *x.SpeculativeAcceptedTokens
+	}
+	return 0
+}
+
+func (x *RequestMetrics) GetSpeculativeAcceptanceRate() float64 {
+	if x != nil && x.SpeculativeAcceptanceRate != nil {
+		return *x.SpeculativeAcceptanceRate
 	}
 	return 0
 }
@@ -2393,7 +2417,7 @@ const file_inferno_v1_inference_proto_rawDesc = "" +
 	"\bFinished\x12/\n" +
 	"\x05state\x18\x01 \x01(\x0e2\x19.inferno.v1.TerminalStateR\x05state\x124\n" +
 	"\ametrics\x18\x02 \x01(\v2\x1a.inferno.v1.RequestMetricsR\ametrics\x120\n" +
-	"\x05error\x18\x03 \x01(\v2\x1a.inferno.v1.InferenceErrorR\x05error\"\xe0\x04\n" +
+	"\x05error\x18\x03 \x01(\v2\x1a.inferno.v1.InferenceErrorR\x05error\"\x8c\a\n" +
 	"\x0eRequestMetrics\x12#\n" +
 	"\routput_tokens\x18\x01 \x01(\rR\foutputTokens\x121\n" +
 	"\x12runtime_latency_ms\x18\x02 \x01(\x01H\x00R\x10runtimeLatencyMs\x88\x01\x01\x12'\n" +
@@ -2403,7 +2427,12 @@ const file_inferno_v1_inference_proto_rawDesc = "" +
 	"\x0fdecode_phase_ms\x18\x06 \x01(\x01H\x04R\rdecodePhaseMs\x88\x01\x01\x12\x1c\n" +
 	"\attft_ms\x18\a \x01(\x01H\x05R\x06ttftMs\x88\x01\x01\x122\n" +
 	"\x13mean_inter_token_ms\x18\b \x01(\x01H\x06R\x10meanInterTokenMs\x88\x01\x01\x12<\n" +
-	"\x18decode_tokens_per_second\x18\t \x01(\x01H\aR\x15decodeTokensPerSecond\x88\x01\x01B\x15\n" +
+	"\x18decode_tokens_per_second\x18\t \x01(\x01H\aR\x15decodeTokensPerSecond\x88\x01\x01\x12A\n" +
+	"\x1aspeculative_drafted_tokens\x18\n" +
+	" \x01(\x04H\bR\x18speculativeDraftedTokens\x88\x01\x01\x12C\n" +
+	"\x1bspeculative_accepted_tokens\x18\v \x01(\x04H\tR\x19speculativeAcceptedTokens\x88\x01\x01\x12C\n" +
+	"\x1bspeculative_acceptance_rate\x18\f \x01(\x01H\n" +
+	"R\x19speculativeAcceptanceRate\x88\x01\x01B\x15\n" +
 	"\x13_runtime_latency_msB\x10\n" +
 	"\x0e_queue_wait_msB\x17\n" +
 	"\x15_backend_execution_msB\x13\n" +
@@ -2412,7 +2441,10 @@ const file_inferno_v1_inference_proto_rawDesc = "" +
 	"\n" +
 	"\b_ttft_msB\x16\n" +
 	"\x14_mean_inter_token_msB\x1b\n" +
-	"\x19_decode_tokens_per_second\"t\n" +
+	"\x19_decode_tokens_per_secondB\x1d\n" +
+	"\x1b_speculative_drafted_tokensB\x1e\n" +
+	"\x1c_speculative_accepted_tokensB\x1e\n" +
+	"\x1c_speculative_acceptance_rate\"t\n" +
 	"\x0eInferenceError\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\x04R\trequestId\x12)\n" +

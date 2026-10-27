@@ -54,6 +54,8 @@ void metrics(const RequestMetrics& source, wire::RequestMetrics* target) {
     COPY_OPTIONAL(prefill_phase_ms); COPY_OPTIONAL(decode_phase_ms);
     COPY_OPTIONAL(ttft_ms); COPY_OPTIONAL(mean_inter_token_ms);
     COPY_OPTIONAL(decode_tokens_per_second);
+    COPY_OPTIONAL(speculative_drafted_tokens); COPY_OPTIONAL(speculative_accepted_tokens);
+    COPY_OPTIONAL(speculative_acceptance_rate);
 #undef COPY_OPTIONAL
 }
 

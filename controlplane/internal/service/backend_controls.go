@@ -14,7 +14,7 @@ import (
 )
 
 type reconfigurableBackend interface {
-	Reconfigure(string, string, string, uint32, uint32, bool) error
+	Reconfigure(string, string, string, string, uint32, uint32, bool) error
 }
 
 func (s *Service) applyModelConfig(w http.ResponseWriter, r *http.Request) {
@@ -48,7 +48,8 @@ func (s *Service) applyModelConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	contextTokens, outputTokens := readBudget(s.modelConfigDir, "context.tokens", 4096), readBudget(s.modelConfigDir, "max-output.tokens", 512)
-	if _, err := inspectModel(path, id, batching, contextTokens, outputTokens); err != nil {
+	draft, _ := readSmallFile(filepath.Join(s.modelConfigDir, "draft-model.path"))
+	if _, err := inspectModel(path, draft, id, batching, contextTokens, outputTokens); err != nil {
 		writeJSON(w, 422, fail(err.Error(), "invalid_request_error", "model_preflight_failed"))
 		return
 	}
@@ -63,9 +64,14 @@ func (s *Service) applyModelConfig(w http.ResponseWriter, r *http.Request) {
 		if err == nil && statErr == nil {
 			lines := strings.Split(string(data), "\n")
 			qualified = len(lines) >= 2 && lines[0] == path && lines[1] == fmt.Sprintf("%d:%d", info.Size(), info.ModTime().Unix())
+			if qualified && draft != "" {
+				draftInfo, draftErr := os.Stat(draft)
+				qualified = draftErr == nil && len(lines) >= 4 && lines[2] == draft &&
+					lines[3] == fmt.Sprintf("%d:%d", draftInfo.Size(), draftInfo.ModTime().Unix())
+			}
 		}
 	}
-	if err := managed.Reconfigure(path, id, batching, contextTokens, outputTokens, qualified); err != nil {
+	if err := managed.Reconfigure(path, draft, id, batching, contextTokens, outputTokens, qualified); err != nil {
 		writeJSON(w, 422, fail("Saved runtime configuration is not applicable", "invalid_request_error", "model_config_apply_failed"))
 		return
 	}

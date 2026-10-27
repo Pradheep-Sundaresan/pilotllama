@@ -32,7 +32,7 @@ func (b *controlBackend) Start(ctx context.Context) error {
 	return nil
 }
 func (b *controlBackend) Stop(context.Context) error { b.stops.Add(1); return nil }
-func (b *controlBackend) Reconfigure(model, modelID, batching string, contextTokens, outputTokens uint32, _ bool) error {
+func (b *controlBackend) Reconfigure(model, draftModel, modelID, batching string, contextTokens, outputTokens uint32, _ bool) error {
 	b.configured, b.model, b.modelID, b.batching = true, model, modelID, batching
 	b.contextTokens, b.outputTokens = contextTokens, outputTokens
 	return nil

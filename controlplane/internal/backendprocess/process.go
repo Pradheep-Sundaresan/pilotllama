@@ -18,10 +18,10 @@ import (
 )
 
 type Config struct {
-	Executable, Model, ModelID, StateDir, Batching string
-	ContextTokens, MaxOutputTokens                 uint32
-	StartupTimeout, ShutdownTimeout                time.Duration
-	QualifyContinuous                              bool
+	Executable, Model, DraftModel, ModelID, StateDir, Batching string
+	ContextTokens, MaxOutputTokens                             uint32
+	StartupTimeout, ShutdownTimeout                            time.Duration
+	QualifyContinuous                                          bool
 }
 
 func (c Config) budgets() (uint32, uint32) {
@@ -46,7 +46,11 @@ func (c Config) Validate() error {
 	if c.Batching == "continuous" && (contextTokens < 64 || maxOutputTokens > contextTokens/2) {
 		return errors.New("continuous output budget must fit each half of the shared context")
 	}
-	for _, path := range []string{c.Executable, c.Model} {
+	paths := []string{c.Executable, c.Model}
+	if c.DraftModel != "" {
+		paths = append(paths, c.DraftModel)
+	}
+	for _, path := range paths {
 		if !filepath.IsAbs(path) {
 			return errors.New("backend executable and model must be absolute local paths")
 		}
@@ -114,6 +118,9 @@ func run(ctx context.Context, c Config, serve func(context.Context, string) erro
 		"--listen", "127.0.0.1:0", "--ready-file", readyFile,
 		"--context-tokens", strconv.FormatUint(uint64(contextTokens), 10),
 		"--max-output-tokens", strconv.FormatUint(uint64(maxOutputTokens), 10))
+	if c.DraftModel != "" {
+		cmd.Args = append(cmd.Args, "--draft-model", c.DraftModel)
+	}
 	if c.Batching == "continuous" {
 		cmd.Args = append(cmd.Args, "--batching", "continuous")
 		if c.QualifyContinuous {

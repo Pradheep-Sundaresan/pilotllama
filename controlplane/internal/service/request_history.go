@@ -12,15 +12,18 @@ import (
 const requestHistoryCapacity = 128
 
 type nativeMeasurements struct {
-	OutputTokens          uint32   `json:"output_tokens"`
-	RuntimeLatencyMS      *float64 `json:"runtime_latency_ms"`
-	QueueWaitMS           *float64 `json:"queue_wait_ms"`
-	BackendExecutionMS    *float64 `json:"backend_execution_ms"`
-	PrefillPhaseMS        *float64 `json:"prefill_phase_ms"`
-	DecodePhaseMS         *float64 `json:"decode_phase_ms"`
-	TTFTMS                *float64 `json:"ttft_ms"`
-	MeanInterTokenMS      *float64 `json:"mean_inter_token_ms"`
-	DecodeTokensPerSecond *float64 `json:"decode_tokens_per_second"`
+	OutputTokens              uint32   `json:"output_tokens"`
+	RuntimeLatencyMS          *float64 `json:"runtime_latency_ms"`
+	QueueWaitMS               *float64 `json:"queue_wait_ms"`
+	BackendExecutionMS        *float64 `json:"backend_execution_ms"`
+	PrefillPhaseMS            *float64 `json:"prefill_phase_ms"`
+	DecodePhaseMS             *float64 `json:"decode_phase_ms"`
+	TTFTMS                    *float64 `json:"ttft_ms"`
+	MeanInterTokenMS          *float64 `json:"mean_inter_token_ms"`
+	DecodeTokensPerSecond     *float64 `json:"decode_tokens_per_second"`
+	SpeculativeDraftedTokens  *uint64  `json:"speculative_drafted_tokens"`
+	SpeculativeAcceptedTokens *uint64  `json:"speculative_accepted_tokens"`
+	SpeculativeAcceptanceRate *float64 `json:"speculative_acceptance_rate"`
 }
 
 type requestRecord struct {
@@ -95,7 +98,8 @@ func makeRecord(id uint64, started time.Time, outcome string, observation rpcbac
 		if m := observation.Finished.Metrics; m != nil {
 			r.Native = &nativeMeasurements{m.OutputTokens, copyMeasurement(m.RuntimeLatencyMs), copyMeasurement(m.QueueWaitMs),
 				copyMeasurement(m.BackendExecutionMs), copyMeasurement(m.PrefillPhaseMs), copyMeasurement(m.DecodePhaseMs),
-				copyMeasurement(m.TtftMs), copyMeasurement(m.MeanInterTokenMs), copyMeasurement(m.DecodeTokensPerSecond)}
+				copyMeasurement(m.TtftMs), copyMeasurement(m.MeanInterTokenMs), copyMeasurement(m.DecodeTokensPerSecond),
+				m.SpeculativeDraftedTokens, m.SpeculativeAcceptedTokens, copyMeasurement(m.SpeculativeAcceptanceRate)}
 		}
 	}
 	return r

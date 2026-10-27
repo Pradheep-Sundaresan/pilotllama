@@ -160,6 +160,12 @@ void Runtime::work() {
         advance(*item->lifecycle, result.state);
         item->timings.finished = RequestClock::now();
         result.metrics = summarize_timings(item->timings);
+        if (auto speculative = backend_->take_speculative_metrics()) {
+            result.metrics.speculative_drafted_tokens = speculative->drafted_tokens;
+            result.metrics.speculative_accepted_tokens = speculative->accepted_tokens;
+            if (speculative->drafted_tokens > 0) result.metrics.speculative_acceptance_rate =
+                static_cast<double>(speculative->accepted_tokens) / speculative->drafted_tokens;
+        }
         {
             std::lock_guard lock(admission_mutex_);
             executing_requests_ = 0;

@@ -11,7 +11,11 @@ import (
 func TestModelConfigPreflightAndSave(t *testing.T) {
 	dir := t.TempDir()
 	model := filepath.Join(dir, "model.bin")
+	draft := filepath.Join(dir, "draft.gguf")
 	if err := os.WriteFile(model, []byte("GGUFfixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(draft, []byte("GGUFdraft"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	token := strings.Repeat("a", 32)
@@ -20,14 +24,14 @@ func TestModelConfigPreflightAndSave(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	req := httptest.NewRequest("PUT", "/internal/v1/model-config", strings.NewReader(`{"path":"`+model+`","model_id":"local-test","batching":"queue","context_tokens":8192,"max_output_tokens":1024}`))
+	req := httptest.NewRequest("PUT", "/internal/v1/model-config", strings.NewReader(`{"path":"`+model+`","draft_model_path":"`+draft+`","model_id":"local-test","batching":"queue","context_tokens":8192,"max_output_tokens":1024}`))
 	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"preflight_level":"container_header_only"`) {
 		t.Fatalf("%d %s", w.Code, w.Body.String())
 	}
-	for name, want := range map[string]string{"model.path": model + "\n", "model.id": "local-test\n", "batching": "queue\n", "context.tokens": "8192\n", "max-output.tokens": "1024\n"} {
+	for name, want := range map[string]string{"model.path": model + "\n", "draft-model.path": draft + "\n", "model.id": "local-test\n", "batching": "queue\n", "context.tokens": "8192\n", "max-output.tokens": "1024\n"} {
 		got, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil || string(got) != want {
 			t.Fatalf("%s=%q err=%v", name, got, err)
@@ -39,5 +43,12 @@ func TestModelConfigPreflightAndSave(t *testing.T) {
 	s.Handler().ServeHTTP(bw, bad)
 	if bw.Code != 422 {
 		t.Fatalf("bad status=%d body=%s", bw.Code, bw.Body.String())
+	}
+	continuous := httptest.NewRequest("PUT", "/internal/v1/model-config", strings.NewReader(`{"path":"`+model+`","draft_model_path":"`+draft+`","model_id":"local-test","batching":"continuous"}`))
+	continuous.Header.Set("Authorization", "Bearer "+token)
+	cw := httptest.NewRecorder()
+	s.Handler().ServeHTTP(cw, continuous)
+	if cw.Code != 200 {
+		t.Fatalf("draft continuous status=%d body=%s", cw.Code, cw.Body.String())
 	}
 }

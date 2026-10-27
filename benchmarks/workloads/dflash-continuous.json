@@ -1,0 +1,25 @@
+{
+  "model": "nemotron-3.5-bolt-e4b",
+  "model_artifact_sha256": "c8af2b8aea10a690a1d9491db744a9446660173cb38fc489612b556615a69612",
+  "quantization": "Q4_K_M",
+  "prompt": "Explain in detail why visible local AI inference is useful for application developers.",
+  "max_tokens": 96,
+  "concurrency_levels": [2],
+  "repetitions_per_client": 2,
+  "request_timeout_seconds": 120,
+  "history_settle_timeout_seconds": 5,
+  "scheduler_poll_interval_ms": 50,
+  "warmup_requests": 1,
+  "runtime_declared": {
+    "native_workers": 1,
+    "native_waiting_queue_capacity": 2,
+    "public_generation_slots": 4,
+    "context_tokens": 4096,
+    "batch_size": 128,
+    "threads": 4,
+    "gpu_layers_requested": 99,
+    "go_rate_per_minute": 0,
+    "go_rate_burst": 0,
+    "go_request_timeout_seconds": 120
+  }
+}

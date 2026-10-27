@@ -31,6 +31,7 @@ struct Trace {
     bool invalid_routing = false;
     bool first_announced = false;
     bool two_announced = false;
+    bool speculative_metrics = false;
 };
 
 class FakeBatchExecutor final : public BatchExecutor {
@@ -77,6 +78,7 @@ public:
             event.output_pieces.push_back({std::to_string(state.id) + ":" + std::to_string(number),
                 state.thinking && number == 0 ? OutputChannel::reasoning : OutputChannel::content});
             event.finished = state.emitted == state.tokens;
+            if (trace_->speculative_metrics) event.speculative_metrics = SpeculativeMetrics{4, 2};
             events.push_back(std::move(event));
         }
         return events;
@@ -112,6 +114,24 @@ TEST(BatchEngine, RequiresConservativeBoundedConfiguration) {
     EXPECT_THROW(ContinuousBatchEngine(std::make_unique<FakeBatchExecutor>(trace), config), std::invalid_argument);
 }
 
+TEST(BatchEngine, PreservesPerSequenceSpeculativeMeasurements) {
+    auto trace = std::make_shared<Trace>();
+    trace->speculative_metrics = true;
+    ContinuousBatchEngine engine(std::make_unique<FakeBatchExecutor>(trace));
+    auto first = engine.submit(request(1));
+    auto second = engine.submit(request(2));
+    const auto a = first.completion.get();
+    const auto b = second.completion.get();
+    for (const auto* result : {&a, &b}) {
+        ASSERT_TRUE(result->metrics.speculative_drafted_tokens);
+        ASSERT_TRUE(result->metrics.speculative_accepted_tokens);
+        ASSERT_TRUE(result->metrics.speculative_acceptance_rate);
+        EXPECT_EQ(*result->metrics.speculative_drafted_tokens, 12U);
+        EXPECT_EQ(*result->metrics.speculative_accepted_tokens, 6U);
+        EXPECT_DOUBLE_EQ(*result->metrics.speculative_acceptance_rate, 0.5);
+    }
+}
+
 TEST(BatchEngine, InterleavesTwoActiveRequestsAndRoutesTokens) {
     auto trace = std::make_shared<Trace>();
     trace->gate_first = true;
@@ -134,7 +154,9 @@ TEST(BatchEngine, InterleavesTwoActiveRequestsAndRoutesTokens) {
 
 TEST(BatchEngine, PreservesReasoningChannelThroughBoundedDelivery) {
     auto trace = std::make_shared<Trace>();
-    ContinuousBatchEngine engine(std::make_unique<FakeBatchExecutor>(trace));
+    BatchEngineConfig config;
+    config.delivery_capacity = 3;
+    ContinuousBatchEngine engine(std::make_unique<FakeBatchExecutor>(trace), config);
     auto value = request(1);
     value.enable_thinking = true;
     std::vector<OutputChannel> channels;

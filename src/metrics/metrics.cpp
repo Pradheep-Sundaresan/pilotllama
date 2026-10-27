@@ -51,6 +51,11 @@ std::string metrics_json(RequestId id, RequestState state, const RequestMetrics&
     field("ttft_ms", m.ttft_ms);
     field("mean_inter_token_ms", m.mean_inter_token_ms);
     field("decode_tokens_per_second", m.decode_tokens_per_second);
+    out << ",\"speculative_drafted_tokens\":";
+    if (m.speculative_drafted_tokens) out << *m.speculative_drafted_tokens; else out << "null";
+    out << ",\"speculative_accepted_tokens\":";
+    if (m.speculative_accepted_tokens) out << *m.speculative_accepted_tokens; else out << "null";
+    field("speculative_acceptance_rate", m.speculative_acceptance_rate);
     out << '}';
     return out.str();
 }

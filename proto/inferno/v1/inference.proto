@@ -258,6 +258,9 @@ message RequestMetrics {
   optional double ttft_ms = 7;
   optional double mean_inter_token_ms = 8;
   optional double decode_tokens_per_second = 9;
+  optional uint64 speculative_drafted_tokens = 10;
+  optional uint64 speculative_accepted_tokens = 11;
+  optional double speculative_acceptance_rate = 12;
 }
 
 // Used in Finished and in the inferno-error-bin trailer for RPC-level failures.

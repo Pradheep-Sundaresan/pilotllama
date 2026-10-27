@@ -95,7 +95,7 @@ export async function loadSnapshot(token: string): Promise<ApiSnapshot> {
   };
 }
 
-export async function saveModelConfig(token: string, input: { path: string; model_id: string; batching: "queue" | "continuous"; context_tokens: number; max_output_tokens: number }) {
+export async function saveModelConfig(token: string, input: { path: string; draft_model_path: string; model_id: string; batching: "queue" | "continuous"; context_tokens: number; max_output_tokens: number }) {
   return requestJSON<ModelConfig>("/internal/v1/model-config", token, { method: "PUT", body: JSON.stringify(input) });
 }
 

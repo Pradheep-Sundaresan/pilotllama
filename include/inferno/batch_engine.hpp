@@ -30,6 +30,8 @@ struct BatchStepEvent {
     std::vector<OutputPiece> output_pieces;
     bool finished = false;
     std::string error;
+    // Per-turn measured speculative work. Absent when DFlash is not active.
+    std::optional<SpeculativeMetrics> speculative_metrics;
 };
 
 // All methods are called by one engine thread. admit() prepares only the named

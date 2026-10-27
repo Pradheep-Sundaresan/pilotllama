@@ -15,6 +15,8 @@ struct RequestMetrics {
     double runtime_latency_ms = 0;
     std::optional<double> queue_wait_ms, backend_execution_ms, prefill_phase_ms, decode_phase_ms;
     std::optional<double> ttft_ms, mean_inter_token_ms, decode_tokens_per_second;
+    std::optional<std::uint64_t> speculative_drafted_tokens, speculative_accepted_tokens;
+    std::optional<double> speculative_acceptance_rate;
 };
 
 [[nodiscard]] RequestMetrics summarize_timings(const RequestTimings& timings);

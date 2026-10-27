@@ -25,6 +25,7 @@ func main() {
 	flag.IntVar(&c.RateBurst, "rate-burst", 0, "generation burst allowance, 0 selects one when rate enabled, maximum 1024")
 	flag.StringVar(&managed.Executable, "backend-exec", "", "opt-in absolute local C++ backend executable (managed child)")
 	flag.StringVar(&managed.Model, "model", "", "absolute existing local GGUF for managed backend; never downloaded")
+	flag.StringVar(&managed.DraftModel, "draft-model", "", "optional absolute existing DFlash GGUF for queue-mode acceleration")
 	flag.StringVar(&managed.ModelID, "model-id", "local-nemotron-4b", "managed backend model alias")
 	flag.StringVar(&managed.Batching, "backend-batching", "queue", "managed native scheduler: queue or continuous")
 	flag.BoolVar(&managed.QualifyContinuous, "backend-qualify-continuous", false, "allow continuous mode only for an externally qualified exact local model")

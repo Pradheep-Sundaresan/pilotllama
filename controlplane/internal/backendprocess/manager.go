@@ -46,7 +46,7 @@ func (m *Manager) State() string {
 }
 
 // Reconfigure replaces only operator-selectable runtime values while fully stopped.
-func (m *Manager) Reconfigure(model, modelID, batching string, contextTokens, maxOutputTokens uint32, qualify bool) error {
+func (m *Manager) Reconfigure(model, draftModel, modelID, batching string, contextTokens, maxOutputTokens uint32, qualify bool) error {
 	if !m.operation.TryLock() {
 		return status.Error(codes.Aborted, "lifecycle operation in progress")
 	}
@@ -57,7 +57,7 @@ func (m *Manager) Reconfigure(model, modelID, batching string, contextTokens, ma
 		return status.Error(codes.Aborted, "backend must be stopped before reconfiguration")
 	}
 	next := m.config
-	next.Model, next.ModelID, next.Batching = model, modelID, batching
+	next.Model, next.DraftModel, next.ModelID, next.Batching = model, draftModel, modelID, batching
 	next.ContextTokens, next.MaxOutputTokens, next.QualifyContinuous = contextTokens, maxOutputTokens, qualify
 	if err := next.Validate(); err != nil {
 		return err

@@ -38,6 +38,9 @@ export type NativeMeasurements = {
   ttft_ms: number | null;
   mean_inter_token_ms: number | null;
   decode_tokens_per_second: number | null;
+  speculative_drafted_tokens: number | null;
+  speculative_accepted_tokens: number | null;
+  speculative_acceptance_rate: number | null;
 };
 
 export type RequestRecord = {
@@ -117,11 +120,14 @@ export type ModelRecord = {
 export type ModelConfig = {
   path: string;
   file_name: string;
+  draft_model_path: string;
+  draft_file_name: string;
   model_id: string;
   batching: "queue" | "continuous";
   context_tokens: number;
   max_output_tokens: number;
   size_bytes: number;
+  draft_size_bytes: number;
   format: "GGUF";
   preflight_level: "container_header_only";
   restart_needed: boolean;
@@ -143,7 +149,7 @@ export type ModelCapabilities = {
   compatibility: "compatible" | "verified";
   template_source: "embedded" | "verified_fallback";
   capabilities: Record<"queue_mode" | "continuous_mode" | "system_messages" | "multi_turn" | "thinking" | "tools", "unavailable" | "detected" | "verified" | "unqualified" | "unknown">;
-  driving_test?: { observed_at_unix_ms: number; model_id: string; file_name: string; grade: "verified" | "compatible" | "experimental" | "unsupported"; checks: Record<string, boolean>; continuous_qualified: boolean; physical_memory_bytes?: number; method: "bounded_local_driving_test" };
+  driving_test?: { observed_at_unix_ms: number; model_id: string; file_name: string; grade: "verified" | "compatible" | "experimental" | "unsupported"; checks: Record<string, boolean>; continuous_qualified: boolean; physical_memory_bytes?: number; speculative_decoding?: { draft_file_name: string; draft_file_size_bytes: number; drafted_tokens: number; accepted_tokens: number; acceptance_rate: number | null }; method: "bounded_local_driving_test" };
 };
 
 export type Health = { healthy?: boolean; ready?: boolean; reason?: string };
