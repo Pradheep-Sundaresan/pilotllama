@@ -8,6 +8,35 @@ React exposes the system in a local observability Studio.
 
 ![PilotLlama Studio Console showing two active local generations, scheduler slots, measured decode rates, and memory](docs/assets/pilotllama-studio-console.png)
 
+## What PilotLlama does today
+
+- Runs qualified local GGUF models on Apple Silicon through `llama.cpp` and Metal.
+- Serves an OpenAI-compatible Chat Completions API with JSON and SSE streaming.
+- Executes two generations concurrently using qualified continuous batching.
+- Holds two additional requests in a bounded waiting queue.
+- Propagates client cancellation and releases native generation capacity.
+- Supports multi-turn chat, separated reasoning, tool calls, structured output and
+  sampling controls when the loaded model supports them.
+- Inspects GGUF capabilities and qualifies models through a bounded Driving Test.
+- Enforces configurable context and output budgets with unified-memory guidance.
+- Supports queue, continuous-batching and optional DFlash speculative modes.
+- Reports measured TTFT, decode rate, throughput, queue state, memory and request
+  lifecycle in Studio.
+- Uses a Go control plane to supervise an isolated C++20 inference backend over
+  localhost gRPC.
+
+On the tested M4 MacBook Air and exact qualified workload, LFM3-1.7B QAD-Q4_0
+reached:
+
+- **~68–70 tok/s** for one active request.
+- **~110 tok/s aggregate** across two concurrent requests.
+
+Results are workload-, model- and hardware-specific, not general performance
+guarantees.
+
+> PilotLlama does not bundle or redistribute model weights. Operators provide their
+> own compatible local GGUF models.
+
 ![PilotLlama system architecture](docs/assets/pilotllama-architecture.svg)
 
 ## Why PilotLlama?
@@ -49,7 +78,7 @@ service around pinned llama.cpp rather than claiming those primitives as inventi
 See the current [`llama-server` feature surface](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md)
 and [Ollama documentation](https://docs.ollama.com/) for their respective capabilities.
 
-## Capabilities
+## Detailed capabilities
 
 - `POST /v1/chat/completions` with JSON or SSE streaming
 - bearer auth, token-bucket rate limiting, drain/resume, readiness and managed restart
