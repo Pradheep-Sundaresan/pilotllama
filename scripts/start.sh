@@ -22,12 +22,15 @@ max_output_tokens=${PILOTLLAMA_MAX_OUTPUT_TOKENS:-}
 listen=${PILOTLLAMA_LISTEN:-127.0.0.1:8080}
 rate=${PILOTLLAMA_RATE_PER_MINUTE:-60}
 burst=${PILOTLLAMA_RATE_BURST:-4}
+queue_capacity=${PILOTLLAMA_QUEUE_CAPACITY:-4}
+queue_wait_timeout=${PILOTLLAMA_QUEUE_WAIT_TIMEOUT:-20s}
 
 usage() {
     echo "Usage: ./scripts/start.sh [--model ABSOLUTE_GGUF] [--model-id ID]" >&2
     echo "                          [--batching queue|continuous] [--listen 127.0.0.1:PORT]" >&2
     echo "                          [--context-tokens N] [--max-output-tokens N]" >&2
     echo "                          [--draft-model ABSOLUTE_DFLASH_GGUF | --no-draft-model]" >&2
+    echo "                          [--queue-capacity N] [--queue-wait-timeout DURATION]" >&2
 }
 
 while [ "$#" -gt 0 ]; do
@@ -46,6 +49,8 @@ while [ "$#" -gt 0 ]; do
         --listen) listen=$2 ;;
         --context-tokens) context_tokens=$2 ;;
         --max-output-tokens) max_output_tokens=$2 ;;
+        --queue-capacity) queue_capacity=$2 ;;
+        --queue-wait-timeout) queue_wait_timeout=$2 ;;
         *) usage; exit 2 ;;
     esac
     shift 2
@@ -178,6 +183,7 @@ set -- "$api" \
     --auth-token-env INFERNO_AUTH_TOKEN \
     --rate-per-minute "$rate" \
     --rate-burst "$burst"
+set -- "$@" --queue-capacity "$queue_capacity" --queue-wait-timeout "$queue_wait_timeout"
 if [ -n "$draft_model" ]; then
     set -- "$@" --draft-model "$draft_model"
 fi

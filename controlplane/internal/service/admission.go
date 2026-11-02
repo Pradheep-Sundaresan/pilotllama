@@ -68,6 +68,12 @@ func (s *Service) setDraining(w http.ResponseWriter, r *http.Request, draining b
 		return
 	}
 	s.admissionMu.Lock()
+	if draining && !s.draining && s.drainSignal != nil {
+		close(s.drainSignal)
+	}
+	if !draining && s.draining && s.drainSignal != nil {
+		s.drainSignal = make(chan struct{})
+	}
 	s.draining = draining
 	state := s.admissionStateLocked()
 	s.admissionMu.Unlock()

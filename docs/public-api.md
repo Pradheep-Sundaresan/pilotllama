@@ -93,13 +93,14 @@ These flags work with managed or external gRPC backends and optional authenticat
 The policy is one process-local token bucket shared by **all generation clients**,
 not a per-IP or per-user quota. It starts full, refills continuously using elapsed
 Go clock time, and caps accumulated credit at the configured burst. One accepted
-middleware check consumes one credit. There is no waiting queue or timer worker;
-restart resets the bucket. Tests use controlled timestamps; production uses Go's
+middleware check consumes one credit. The rate limiter itself does not wait; the
+separate Phase 12B admission queue is described below. Restart resets the bucket.
+Tests use controlled timestamps; production uses Go's
 monotonic clock component. This policy exposes no new measurement or metric.
 
 Authentication runs first. Unauthenticated requests consume no credit. Rate
 rejection happens before application body parsing, request-ID allocation, the
-existing four-handler capacity check, or backend calls. It returns HTTP 429 with
+generation waiting queue, or backend calls. It returns HTTP 429 with
 JSON `rate_limit_error`/`rate_limit_exceeded` and `Retry-After` whole seconds,
 rounded up until one credit refills. That delay is advisory: concurrent clients can
 consume the next credit. Rejected streaming requests do not start SSE.
@@ -115,6 +116,36 @@ Verification covers burst/refill/capacity, rounded retry delays, concurrent call
 auth ordering, backend/admission exclusion, public health, configuration bounds and
 disabled defaults. A live model-free C++ fixture verifies successful HTTP generation
 followed by JSON/SSE rate rejections; native inference is unchanged.
+
+## Bounded generation waiting — Phase 12B
+
+The Go service has two active generation-handler permits and a separate bounded
+waiting queue. `--queue-capacity` selects 1..1024 waiting handlers (default 4), and
+`--queue-wait-timeout` selects a positive duration up to one minute (default 20s).
+`scripts/start.sh` exposes the same flags and the corresponding
+`PILOTLLAMA_QUEUE_CAPACITY` and `PILOTLLAMA_QUEUE_WAIT_TIMEOUT` environment values.
+
+When both active permits are occupied, a request may enter the waiting queue. Its
+response carries `X-Queue-Position`, which is the snapshot position when admitted,
+not a live rank. Waiting ends when a permit becomes available, the queue deadline
+expires, the client context is cancelled, or admission starts draining. Cancellation,
+expiry and drain remove the waiter immediately; they never open an RPC to C++.
+
+When the waiting queue is full, the API returns HTTP 429 with code `queue_full` and
+an integer `Retry-After`. The delay is calculated from the nearest current queue
+deadline and is advisory because completions, cancellations and other retrying
+clients change capacity. Queue expiry returns HTTP 504 `queue_wait_timeout`.
+Cancellation before response commitment maps to HTTP 408 when the client remains
+able to receive it. Native queueing and two-sequence execution remain unchanged.
+
+Phase 12C extends the authenticated scheduler snapshot with point-in-time Go lobby
+waiting/capacity, active-handler occupancy, and cumulative service-lifetime counters
+for queue-full, queue-expired, rate-limited, and canceled-while-waiting outcomes.
+These are distinct from the existing C++ waiting/executing snapshot. Retained
+requests that reached inference include `go_queue_wait_ms`, measured monotonically
+from Go admission attempt until a handler permit was acquired. It does not overlap
+the subsequent RPC interval. Requests rejected or canceled before inference are
+counted but are not inserted into the inference request-history ring.
 
 ## Model discovery — Phase 3F-1
 
@@ -231,10 +262,10 @@ explicit subset policy, not a claim of compatibility with every streaming client
 | Unknown/not-loaded requested alias on a READY backend | 404 |
 | Cancellation while response remains writable | 408 |
 | Body exceeds cap / wrong media type | 413 / 415 |
-| HTTP handler or native admission full | 429 server_busy |
+| Go waiting queue or native admission full | 429 queue_full / server_busy |
 | Native/protocol failure, invalid text, oversized output | 502 |
 | Backend unreachable or not ready | 503 |
-| Request/RPC/native deadline | 504 |
+| Go queue-wait or request/RPC/native deadline | 504 |
 
 Errors have an error object with message/type/param/code. Messages are fixed and
 sanitized, never forwarded native paths/prompts. Native failed/cancelled/timed-out

@@ -32,6 +32,7 @@ type requestRecord struct {
 	FinishedAtUnixMS       int64               `json:"finished_at_unix_ms"`
 	Outcome                string              `json:"outcome"`
 	HandlerLatencyMS       float64             `json:"handler_latency_ms"`
+	GoQueueWaitMS          float64             `json:"go_queue_wait_ms"`
 	RPCLatencyMS           *float64            `json:"rpc_latency_ms"`
 	RPCTTFTMS              *float64            `json:"rpc_ttft_ms"`
 	ReceivedTokens         uint32              `json:"received_tokens"`
@@ -78,10 +79,10 @@ func copyMeasurement(v *float64) *float64 {
 	return &c
 }
 
-func makeRecord(id uint64, started time.Time, outcome string, observation rpcbackend.Observation, streamFailure *bool) requestRecord {
+func makeRecord(id uint64, started time.Time, goQueueWait time.Duration, outcome string, observation rpcbackend.Observation, streamFailure *bool) requestRecord {
 	finished := time.Now()
 	r := requestRecord{finished: finished, RequestID: strconv.FormatUint(id, 10), FinishedAtUnixMS: finished.UnixMilli(), Outcome: outcome,
-		HandlerLatencyMS: float64(finished.Sub(started)) / float64(time.Millisecond), RPCLatencyMS: copyMeasurement(observation.LatencyMS),
+		HandlerLatencyMS: float64(finished.Sub(started)) / float64(time.Millisecond), GoQueueWaitMS: float64(goQueueWait) / float64(time.Millisecond), RPCLatencyMS: copyMeasurement(observation.LatencyMS),
 		RPCTTFTMS: copyMeasurement(observation.TTFTMS), ReceivedTokens: observation.ReceivedTokens, TokenBytes: observation.TokenBytes,
 		ReceiveTokensPerSecond: copyMeasurement(observation.ReceiveTokensPerSecond), TransportComplete: observation.TransportComplete}
 	if streamFailure != nil {

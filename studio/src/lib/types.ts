@@ -48,6 +48,7 @@ export type RequestRecord = {
   finished_at_unix_ms: number;
   outcome: "completed" | "failed" | "delivery_failed";
   handler_latency_ms: number;
+  go_queue_wait_ms: number;
   rpc_latency_ms: number | null;
   rpc_ttft_ms: number | null;
   received_tokens: number;
@@ -83,6 +84,16 @@ export type SchedulerReport = {
   executing_requests: number;
   queue_capacity: number;
   status_rpc_latency_ms: number;
+  go_waiting_requests: number;
+  go_waiting_capacity: number;
+  go_active_handlers: number;
+  go_active_capacity: number;
+  admission_outcomes: {
+    queue_full: number;
+    queue_expired: number;
+    rate_limited: number;
+    canceled_while_waiting: number;
+  };
 };
 
 export type ProcessMemorySample = {

@@ -23,6 +23,8 @@ func main() {
 	flag.StringVar(&authTokenEnv, "auth-token-env", "", "opt-in bearer auth: name of environment variable holding a 32..256 character local token")
 	flag.IntVar(&c.RatePerMinute, "rate-per-minute", 0, "shared generation requests/minute, 0 disables, maximum 60000")
 	flag.IntVar(&c.RateBurst, "rate-burst", 0, "generation burst allowance, 0 selects one when rate enabled, maximum 1024")
+	flag.IntVar(&c.QueueCapacity, "queue-capacity", 4, "maximum Go waiting requests, 1..1024")
+	flag.DurationVar(&c.QueueWaitTimeout, "queue-wait-timeout", 20*time.Second, "maximum time waiting for a generation slot, at most 1m")
 	flag.StringVar(&managed.Executable, "backend-exec", "", "opt-in absolute local C++ backend executable (managed child)")
 	flag.StringVar(&managed.Model, "model", "", "absolute existing local GGUF for managed backend; never downloaded")
 	flag.StringVar(&managed.DraftModel, "draft-model", "", "optional absolute existing DFlash GGUF for queue-mode acceleration")

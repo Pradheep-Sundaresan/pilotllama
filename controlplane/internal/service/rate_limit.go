@@ -39,6 +39,7 @@ func (s *Service) rateLimit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.limiter != nil {
 			if seconds := s.limiter.take(time.Now()); seconds > 0 {
+				s.rateLimited.Add(1)
 				w.Header().Set("Retry-After", strconv.Itoa(seconds))
 				writeJSON(w, http.StatusTooManyRequests, fail("Generation request rate exceeded", "rate_limit_error", "rate_limit_exceeded"))
 				return

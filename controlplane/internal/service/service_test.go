@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestConfig(t *testing.T) {
@@ -39,6 +40,21 @@ func TestConfig(t *testing.T) {
 				t.Fatalf("valid=%v, error=%v", tc.valid, err)
 			}
 		})
+	}
+}
+
+func TestQueueConfigBounds(t *testing.T) {
+	base := Config{Listen: "127.0.0.1:8080", Backend: "http://127.0.0.1:8081"}
+	for _, tc := range []struct {
+		capacity int
+		wait     time.Duration
+		valid    bool
+	}{{0, 0, true}, {4, 20 * time.Second, true}, {-1, time.Second, false}, {1025, time.Second, false}, {4, time.Minute + time.Nanosecond, false}} {
+		config := base
+		config.QueueCapacity, config.QueueWaitTimeout = tc.capacity, tc.wait
+		if err := config.Validate(); (err == nil) != tc.valid {
+			t.Fatalf("capacity=%d wait=%s valid=%v err=%v", tc.capacity, tc.wait, tc.valid, err)
+		}
 	}
 }
 

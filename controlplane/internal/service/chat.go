@@ -322,6 +322,7 @@ func (s *Service) chat(w http.ResponseWriter, r *http.Request) {
 	startedAt := time.Now()
 	var observation *rpcbackend.Observation
 	var streamFailure *bool
+	var goQueueWait time.Duration
 	outcome := "failed"
 	id := s.ids.Add(1)
 	defer func() {
@@ -329,7 +330,7 @@ func (s *Service) chat(w http.ResponseWriter, r *http.Request) {
 			if streamFailure != nil && *streamFailure {
 				outcome = "delivery_failed"
 			}
-			s.history.add(makeRecord(id, startedAt, outcome, *observation, streamFailure))
+			s.history.add(makeRecord(id, startedAt, goQueueWait, outcome, *observation, streamFailure))
 		}
 	}()
 	if id == 0 {
@@ -337,13 +338,12 @@ func (s *Service) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("X-Request-ID", strconv.FormatUint(id, 10))
-	select {
-	case s.active <- struct{}{}:
-		defer func() { <-s.active }()
-	default:
-		writeJSON(w, 429, fail("Server is busy; retry later", "server_error", "server_busy"))
+	var acquired bool
+	goQueueWait, acquired = s.acquireGeneration(w, r, id)
+	if !acquired {
 		return
 	}
+	defer func() { <-s.active }()
 	ctx, cancel := context.WithTimeout(r.Context(), s.requestTimeout)
 	defer cancel()
 	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))

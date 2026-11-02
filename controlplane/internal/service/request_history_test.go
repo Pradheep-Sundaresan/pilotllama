@@ -93,7 +93,7 @@ func TestHistoryBoundedConcurrentAndCopied(t *testing.T) {
 	}
 	duration := 2.0
 	code := codes.OK
-	v := makeRecord(1, time.Now(), "completed", rpcbackend.Observation{LatencyMS: &duration, RPCCode: &code}, nil)
+	v := makeRecord(1, time.Now(), 0, "completed", rpcbackend.Observation{LatencyMS: &duration, RPCCode: &code}, nil)
 	duration = 900
 	if *v.RPCLatencyMS != 2 || *v.RPCCode != "OK" {
 		t.Fatal("retained caller-owned data")

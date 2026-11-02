@@ -27,17 +27,19 @@ import (
 )
 
 type Config struct {
-	Listen          string
-	Backend         string
-	BackendGRPC     string
-	RequestTimeout  time.Duration
-	MaxOutputTokens int    // Public per-request cap; must match the native runtime configuration.
-	AuthToken       string // Optional local bearer secret; never log Config or this field.
-	RatePerMinute   int    // Zero disables the shared generation request limiter.
-	RateBurst       int    // Zero selects one request when rate limiting is enabled.
-	StudioDir       string // Optional absolute production bundle directory.
-	ModelConfigDir  string // Optional private directory used by the next-start model selector.
-	ManagedBackend  ManagedBackend
+	Listen           string
+	Backend          string
+	BackendGRPC      string
+	RequestTimeout   time.Duration
+	QueueCapacity    int
+	QueueWaitTimeout time.Duration
+	MaxOutputTokens  int    // Public per-request cap; must match the native runtime configuration.
+	AuthToken        string // Optional local bearer secret; never log Config or this field.
+	RatePerMinute    int    // Zero disables the shared generation request limiter.
+	RateBurst        int    // Zero selects one request when rate limiting is enabled.
+	StudioDir        string // Optional absolute production bundle directory.
+	ModelConfigDir   string // Optional private directory used by the next-start model selector.
+	ManagedBackend   ManagedBackend
 }
 
 // Only explicit loopback IPs are accepted; no DNS or wildcard binding.
@@ -81,6 +83,9 @@ func (c Config) Validate() error {
 	if c.RequestTimeout < 0 || c.RequestTimeout > time.Hour {
 		return errors.New("request timeout must be positive and at most one hour (zero selects default)")
 	}
+	if c.QueueCapacity < 0 || c.QueueCapacity > 1024 || c.QueueWaitTimeout < 0 || c.QueueWaitTimeout > time.Minute {
+		return errors.New("queue capacity must be 0..1024 and wait timeout at most one minute")
+	}
 	if c.MaxOutputTokens < 0 || c.MaxOutputTokens > 1048576 {
 		return errors.New("maximum output tokens must be 1..1048576 (zero selects 512)")
 	}
@@ -123,6 +128,15 @@ type Service struct {
 	rpc                inferenceClient
 	ids                atomic.Uint64
 	active             chan struct{}
+	queueCapacity      int
+	queueWaitTimeout   time.Duration
+	queueMu            sync.Mutex
+	waiters            map[uint64]time.Time
+	drainSignal        chan struct{}
+	queueFull          atomic.Uint64
+	queueExpired       atomic.Uint64
+	queueCanceled      atomic.Uint64
+	rateLimited        atomic.Uint64
 	requestTimeout     time.Duration
 	maxOutputTokens    int
 	authDigest         *[32]byte
@@ -156,7 +170,16 @@ func New(c Config) (*Service, error) {
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
-	s := &Service{active: make(chan struct{}, 4), requestTimeout: c.RequestTimeout,
+	queueCapacity := c.QueueCapacity
+	if queueCapacity == 0 {
+		queueCapacity = 4
+	}
+	queueWait := c.QueueWaitTimeout
+	if queueWait == 0 {
+		queueWait = 20 * time.Second
+	}
+	s := &Service{active: make(chan struct{}, 2), queueCapacity: queueCapacity, queueWaitTimeout: queueWait,
+		waiters: make(map[uint64]time.Time), drainSignal: make(chan struct{}), requestTimeout: c.RequestTimeout,
 		maxOutputTokens: c.MaxOutputTokens, observedSince: time.Now()}
 	if s.maxOutputTokens == 0 {
 		s.maxOutputTokens = 512

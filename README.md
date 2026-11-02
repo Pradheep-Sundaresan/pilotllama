@@ -13,7 +13,8 @@ React exposes the system in a local observability Studio.
 - Runs qualified local GGUF models on Apple Silicon through `llama.cpp` and Metal.
 - Serves an OpenAI-compatible Chat Completions API with JSON and SSE streaming.
 - Executes two generations concurrently using qualified continuous batching.
-- Holds two additional requests in a bounded waiting queue.
+- Holds four requests by default in a configurable Go waiting queue ahead of two
+  generation handlers.
 - Propagates client cancellation and releases native generation capacity.
 - Supports multi-turn chat, separated reasoning, tool calls, structured output and
   sampling controls when the loaded model supports them.
@@ -65,7 +66,7 @@ service around pinned llama.cpp rather than claiming those primitives as inventi
 | :--- | :--- | :--- | :--- |
 | **Primary philosophy** | Portable inference engine plus configurable server | Easy model acquisition and local serving | Visible, predictable local AI service for applications |
 | **Architecture** | C/C++ library, CLI and optional HTTP server | Go daemon with managed native runners | Go control plane ↔ localhost gRPC ↔ owned C++20 data plane |
-| **Scheduling and concurrency** | Configurable parallel slots and continuous batching | Daemon-managed parallelism and queueing | Explicit bounded queue or qualified two-sequence continuous mode with two waiting slots |
+| **Scheduling and concurrency** | Configurable parallel slots and continuous batching | Daemon-managed parallelism and queueing | Two generation handlers, configurable bounded Go waiting, and qualified two-sequence continuous mode |
 | **Concurrent TTFT evidence** | Not compared by this project | Not compared by this project | Controlled two-client run reduced median TTFT 77% versus PilotLlama queue mode; not a universal or P95 claim |
 | **Memory policy** | Operator-selected context, batch and cache flags | Configurable context and parallelism | Startup/request budget enforcement, measured allocations and labelled unified-memory presets |
 | **Process lifecycle** | Deployment-owned | Daemon-managed runners | Go remains available while its supervised native child is stopped/restarted; readiness blocks traffic |
@@ -233,7 +234,7 @@ cooperative cancellation. Metal work is not preempted, so cleanup may outlast HT
 
 | Mode | Native execution | Status |
 | --- | --- | --- |
-| `queue` | 1 active request + bounded wait queue; optional compatible DFlash draft | default |
+| `queue` | 2 Go generation handlers + configurable Go waiting; native execution remains model/runtime bounded; optional compatible DFlash draft | default |
 | `continuous` | 2 active sequences + 2 waiting; optional exact-pair-qualified DFlash | opt-in; built-in verified or exact locally qualified GGUF/pair |
 
 The measured two-client comparison reduced median TTFT from **1,146.7 ms to
@@ -333,6 +334,11 @@ and wire checks; Studio production build; release version/help; and Doctor with
 0 failures and 0 warnings. Real-model checks are bounded compatibility evidence,
 not stress, thermal, leak, quality or universal performance claims.
 
+The model-free Phase 12 admission verification covers 2,000 overload decisions,
+waiting-client cancellation, deadline cascades and drain/resume recovery. Reproduce
+it with `./scripts/verify-phase12d.sh`; JSON/CSV evidence stays under ignored build
+state.
+
 ```sh
 cmake --preset dev && cmake --build --preset dev
 ctest --test-dir build/dev --output-on-failure
@@ -344,6 +350,7 @@ sh scripts/test-proto-interop.sh
 sh scripts/test-rpc.sh
 (cd studio && npm run build)
 ./scripts/doctor.sh
+./scripts/verify-phase12d.sh
 ```
 
 PilotLlama is licensed under [Apache-2.0](LICENSE). Models, dependencies, builds,

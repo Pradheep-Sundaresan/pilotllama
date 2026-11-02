@@ -84,6 +84,9 @@ func TestRateMiddlewareOrderAndNoBackendWork(t *testing.T) {
 	if b.statusCalls != 1 || b.generationCalls != 1 || len(s.active) != 0 || s.ids.Load() != id {
 		t.Fatal("rate-rejected request reached backend/admission")
 	}
+	if s.rateLimited.Load() != 2 {
+		t.Fatalf("rate-limit counter=%d", s.rateLimited.Load())
+	}
 	for _, path := range []string{"/healthz", "/readyz"} {
 		w := httptest.NewRecorder()
 		s.Handler().ServeHTTP(w, httptest.NewRequest("GET", path, nil))
