@@ -43,6 +43,14 @@ type chatRequest struct {
 	Tools               []toolInput          `json:"tools"`
 	ToolChoice          *string              `json:"tool_choice"`
 	ResponseFormat      *responseFormatInput `json:"response_format"`
+	PilotLlama          *pilotLlamaOptions   `json:"pilotllama"`
+}
+
+// pilotLlamaOptions is an explicit, namespaced extension. It deliberately does
+// not impersonate OpenAI stream_options/usage because native prompt-token usage
+// is not currently measured end to end.
+type pilotLlamaOptions struct {
+	IncludeMetrics bool `json:"include_metrics"`
 }
 
 type responseFormatInput struct {
@@ -318,6 +326,31 @@ func chunk(id, model string, created int64, delta any, reason any) map[string]an
 		"choices": []any{map[string]any{"index": 0, "delta": delta, "logprobs": nil, "finish_reason": reason}}}
 }
 
+func metricsReceipt(id, model string, created int64, goQueueWait time.Duration, result rpcbackend.Observation) map[string]any {
+	native := result.Finished.Metrics
+	return map[string]any{
+		"id": id, "object": "pilotllama.metrics", "created": created, "model": model,
+		"request_id": strconv.FormatUint(result.RequestID, 10),
+		"metrics": map[string]any{
+			"output_tokens":    result.Finished.Metrics.OutputTokens,
+			"go_queue_wait_ms": float64(goQueueWait) / float64(time.Millisecond),
+			"rpc_latency_ms":   result.LatencyMS,
+			"rpc_ttft_ms":      result.TTFTMS,
+			"native": map[string]any{
+				"runtime_latency_ms":          native.RuntimeLatencyMs,
+				"queue_wait_ms":               native.QueueWaitMs,
+				"prefill_phase_ms":            native.PrefillPhaseMs,
+				"decode_phase_ms":             native.DecodePhaseMs,
+				"ttft_ms":                     native.TtftMs,
+				"decode_tokens_per_second":    native.DecodeTokensPerSecond,
+				"speculative_drafted_tokens":  native.SpeculativeDraftedTokens,
+				"speculative_accepted_tokens": native.SpeculativeAcceptedTokens,
+				"speculative_acceptance_rate": native.SpeculativeAcceptanceRate,
+			},
+		},
+	}
+}
+
 func (s *Service) chat(w http.ResponseWriter, r *http.Request) {
 	startedAt := time.Now()
 	var observation *rpcbackend.Observation
@@ -412,7 +445,7 @@ func (s *Service) chat(w http.ResponseWriter, r *http.Request) {
 		math.IsNaN(temperature) || math.IsInf(temperature, 0) || temperature < 0 || temperature > 2 ||
 		math.IsNaN(topP) || math.IsInf(topP, 0) || topP <= 0 || topP > 1 || topK < 0 || topK > 100000 ||
 		(input.Seed != nil && (*input.Seed < 0 || *input.Seed > math.MaxUint32)) || !validStops(input.Stop) ||
-		(input.N != nil && *input.N != 1) {
+		(input.N != nil && *input.N != 1) || (input.PilotLlama != nil && input.PilotLlama.IncludeMetrics && !input.Stream) {
 		writeJSON(w, 400, fail(fmt.Sprintf("Require valid chat, token limit 1..%d, temperature 0..2, top_p (0,1], top_k 0..100000, uint32 seed, at most 4 stop strings, and n 1", s.maxOutputTokens), "invalid_request_error", "unsupported_request"))
 		return
 	}
@@ -623,6 +656,11 @@ func (s *Service) chat(w http.ResponseWriter, r *http.Request) {
 		}
 		if send(chunk(completionID, input.Model, created, map[string]string{}, reason)) != nil {
 			return
+		}
+		if input.PilotLlama != nil && input.PilotLlama.IncludeMetrics {
+			if send(metricsReceipt(completionID, input.Model, created, goQueueWait, result)) != nil {
+				return
+			}
 		}
 		_ = send("[DONE]")
 		return

@@ -11,7 +11,7 @@ React exposes the system in a local observability Studio.
 ## What PilotLlama does today
 
 - Runs qualified local GGUF models on Apple Silicon through `llama.cpp` and Metal.
-- Serves an OpenAI-compatible Chat Completions API with JSON and SSE streaming.
+- Serves a documented OpenAI-style Chat Completions subset with JSON and SSE streaming.
 - Executes two generations concurrently using qualified continuous batching.
 - Holds four requests by default in a configurable Go waiting queue ahead of two
   generation handlers.
@@ -174,6 +174,11 @@ Read-only diagnostics: `./scripts/setup.sh --check`.
 
 ## Use from your app
 
+**Building an application? Start with the [HTTP API guide](docs/http-api.md), then
+check the [compatibility matrix](docs/api-compatibility.md) and copy a working
+[TypeScript](examples/typescript/pilotllama-stream.ts) or
+[Python](examples/python/pilotllama_stream.py) streaming client.**
+
 1. Start PilotLlama with an existing local GGUF model.
 2. Read the generated local bearer token.
 3. Configure an OpenAI-compatible client with:
@@ -208,7 +213,8 @@ curl --no-buffer http://127.0.0.1:8080/v1/chat/completions \
     "top_k":40,
     "seed":12345,
     "stop":["END"],
-    "stream":true
+    "stream":true,
+    "pilotllama":{"include_metrics":true}
   }'
 ```
 
@@ -218,8 +224,11 @@ support can opt in with `"thinking":true`; reasoning streams separately from fin
 content. Generation remains greedy with
 `temperature:0`, or applications can opt into bounded `temperature`, `top_p`,
 `top_k`, `seed`, and `stop` controls. Output is bounded by the operator-selected runtime budget (safe default:
-512 tokens). Unsupported capabilities and options fail explicitly. See
-[the API contract](docs/public-api.md).
+512 tokens). The optional namespaced metrics receipt exposes measured output tokens,
+queue wait, TTFT and decode telemetry without inventing unavailable prompt-token
+usage. Unsupported capabilities and options fail explicitly. See the concise
+[HTTP API guide](docs/http-api.md), [OpenAPI specification](api/openapi.yaml), and
+[full historical contract](docs/public-api.md).
 
 ## Request path
 

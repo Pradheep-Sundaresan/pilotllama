@@ -200,6 +200,7 @@ also verifies discovery followed by generation using the returned alias.
 | `tool_choice` | String `none`, `auto`, or `required`; defaults to `auto` with tools and `none` without tools |
 | `response_format` | `text` (default), `json_object`, or named strict `json_schema`; schema at most 64 KiB. Structured output and tools are mutually exclusive. |
 | `n` | Omitted or 1 |
+| `pilotllama.include_metrics` | Optional stream-only extension; emits one measured `pilotllama.metrics` receipt before `[DONE]` |
 
 Unknown fields are rejected rather than ignored. A loaded model's embedded llama.cpp
 chat template must report support for requested system messages, multi-turn history
@@ -208,7 +209,7 @@ uses separate `message.reasoning_content`; SSE uses separate
 `delta.reasoning_content` chunks. Reasoning and final content share the 1 MiB byte
 bound and configured native output-token budget. The documented
 template-less Nemotron fallback accepts one user message only. Developer messages,
-multimodal content, logprobs, stream_options/usage chunks and OpenAI model-deletion APIs are not supported.
+multimodal content, logprobs, OpenAI `stream_options`/standard usage chunks and model-deletion APIs are not supported.
 Validated calls return as JSON `message.tool_calls` or indexed SSE
 `delta.tool_calls` fragments and uses `finish_reason:"tool_calls"`. Names must match a
 submitted definition, arguments must finish as bounded JSON objects, and missing model
@@ -229,7 +230,8 @@ decoding semantics apply to escapes; raw non-UTF-8 bodies are rejected.
 Regular success returns id/object/created/model and one assistant-message choice.
 Stream success returns `data:` JSON records with object chat.completion.chunk:
 one assistant-role delta, content deltas, one final empty delta with finish_reason,
-then `data: [DONE]`. IDs, model and creation timestamp stay consistent. Public IDs
+an optional requested `pilotllama.metrics` receipt, then `data: [DONE]`. IDs, model
+and creation timestamp stay consistent. Public IDs
 are chatcmpl- plus the internal decimal request ID; X-Request-ID carries that ID.
 IDs use a per-service cryptographically seeded atomic sequence, reducing restart
 collisions with requests still cleaning up in a backend; this is not a distributed
@@ -238,9 +240,11 @@ ID allocator. Incoming client IDs are not trusted/forwarded as native IDs.
 finish_reason is `length` when measured native output count reaches the requested
 budget; otherwise a completed generation reports `stop`. It is based on native
 token events, including empty pieces, not text bytes or number of public chunks.
-No prompt token counts, usage totals, model fingerprints or performance fields are
-fabricated. Usage is omitted because prompt-token counts are not exposed yet.
-Native/RPC observations remain internal; no public metrics endpoint is added.
+No prompt token counts, usage totals or model fingerprints are fabricated. Standard
+usage is omitted because prompt-token counts are not exposed yet. When explicitly
+requested with `pilotllama.include_metrics`, a final namespaced receipt exposes only
+measured output-token and timing observations; unavailable values remain null. This
+is a PilotLlama extension, not OpenAI `usage`.
 
 Raw native pieces can split Unicode characters. The HTTP adapter buffers incomplete
 code points (at most three pending bytes between pieces), emits valid UTF-8 JSON,

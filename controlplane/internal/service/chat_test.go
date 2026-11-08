@@ -164,6 +164,61 @@ func TestChatJSONAndSSE(t *testing.T) {
 	}
 }
 
+func TestChatOptionalPilotLlamaMetricsReceipt(t *testing.T) {
+	backend := &chatBackend{generate: func(_ context.Context, r *pb.GenerateRequest, consume func([]byte) error) (rpcbackend.Observation, error) {
+		if err := consume([]byte("ok")); err != nil {
+			return rpcbackend.Observation{}, err
+		}
+		runtime, ttft, decode, rate := 12.5, 2.5, 10.0, 100.0
+		result := success(1)
+		result.RequestID = r.RequestId
+		result.LatencyMS = &runtime
+		result.TTFTMS = &ttft
+		result.Finished.Metrics.RuntimeLatencyMs = &runtime
+		result.Finished.Metrics.TtftMs = &ttft
+		result.Finished.Metrics.DecodePhaseMs = &decode
+		result.Finished.Metrics.DecodeTokensPerSecond = &rate
+		return result, nil
+	}}
+	request := `{"model":"test-model","messages":[{"role":"user","content":"hi"}],"max_tokens":4,"stream":true,"pilotllama":{"include_metrics":true}}`
+	w := invoke(chatService(backend), request)
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	receipts, done := 0, 0
+	for _, record := range strings.Split(strings.TrimSpace(w.Body.String()), "\n\n") {
+		data := strings.TrimPrefix(record, "data: ")
+		if data == "[DONE]" {
+			done++
+			continue
+		}
+		var event map[string]any
+		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			t.Fatal(err)
+		}
+		if event["object"] != "pilotllama.metrics" {
+			continue
+		}
+		receipts++
+		if event["id"] != "chatcmpl-"+w.Header().Get("X-Request-ID") || event["request_id"] != w.Header().Get("X-Request-ID") {
+			t.Fatal(event)
+		}
+		metrics := event["metrics"].(map[string]any)
+		native := metrics["native"].(map[string]any)
+		if metrics["output_tokens"] != float64(1) || metrics["rpc_ttft_ms"] != 2.5 || native["decode_tokens_per_second"] != 100.0 {
+			t.Fatal(metrics)
+		}
+	}
+	if receipts != 1 || done != 1 || !strings.Contains(w.Body.String(), `"finish_reason":"stop"`) {
+		t.Fatal(receipts, done, w.Body)
+	}
+
+	nonStream := strings.Replace(request, `"stream":true`, `"stream":false`, 1)
+	if rejected := invoke(chatService(backend), nonStream); rejected.Code != 400 || !strings.Contains(rejected.Body.String(), `"unsupported_request"`) {
+		t.Fatal(rejected.Code, rejected.Body)
+	}
+}
+
 func TestChatMapsSystemAndMultiTurnHistory(t *testing.T) {
 	backend := &chatBackend{generate: func(_ context.Context, request *pb.GenerateRequest, _ func([]byte) error) (rpcbackend.Observation, error) {
 		wantRoles := []pb.ChatRole{pb.ChatRole_CHAT_ROLE_SYSTEM, pb.ChatRole_CHAT_ROLE_USER, pb.ChatRole_CHAT_ROLE_ASSISTANT, pb.ChatRole_CHAT_ROLE_USER}
